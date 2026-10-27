@@ -118,6 +118,20 @@ Its JSON output records the requested and published certification labels,
 proof metadata, failure stage, publication state, component timings, and
 transaction-phase timings.
 
+Optional `--repeat-until-ms N` (off by default; output is unchanged without
+it) adds a `warm_repeat` object for small rows whose single-call time is near
+clock resolution. After the normal first call, the tool repeats the
+class/unit transaction at least 3 times and until at least N ms of transaction
+time have accumulated. Every repeat rebuilds the number field, equation and
+maximal orders, compute options, class group context and unit group from the
+polynomial, and empties the library's thread-local memos (Hensel data,
+roots of unity) first; only the transaction is timed. `warm_repeat` records
+`first_class_unit_ms` (the cold first call, also in `component_timing_ms`),
+`repeat_count`, `repeat_total_ms`, `repeat_mean_class_unit_ms`,
+`repeat_mean_preparation_ms` and `repeat_all_succeeded`. It cannot be combined
+with `--marked-protocol` or `--compute-sunit`; the existing timing fields
+still describe the first call only.
+
 Only compact, source-neutral correctness and certification fixtures belong in
 `test/data/class_unit_fields.json`. External-engine corpora and campaign
 configuration do not belong in this repository.

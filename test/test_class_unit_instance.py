@@ -523,6 +523,32 @@ def assert_relation_search_budget_exhausted(exe: Path, root: Path) -> None:
     assert succeeded["failure_detail"] is None
 
 
+def assert_warm_repeat_flag(exe: Path, root: Path) -> None:
+    base = [str(exe), "--coeffs", "-5,0,1", "--mode", "grh"]
+    off = run_json(base, root)
+    assert "warm_repeat" not in off
+    on = run_json(base + ["--repeat-until-ms", "5"], root)
+    assert set(on) - set(off) == {"warm_repeat"}
+    assert set(off) <= set(on)
+    for key in ("success", "class_group", "unit_group", "mode",
+                "certification_status", "maximal_order_discriminant"):
+        if key in off:
+            assert on[key] == off[key], key
+    assert set(on["component_timing_ms"]) == set(off["component_timing_ms"])
+    warm = on["warm_repeat"]
+    assert warm["requested_until_ms"] == 5
+    assert warm["repeat_count"] >= 3
+    assert warm["repeat_all_succeeded"] is True
+    assert warm["first_class_unit_ms"] > 0.0
+    assert warm["repeat_mean_class_unit_ms"] > 0.0
+    assert warm["repeat_total_ms"] >= 5.0
+    assert warm["repeat_mean_preparation_ms"] > 0.0
+    for bad in ("0", "-1", "x", ""):
+        assert_rejected(base + ["--repeat-until-ms", bad], root)
+    assert_rejected(base + ["--repeat-until-ms", "5", "--compute-sunit"], root)
+    assert_rejected(base + ["--repeat-until-ms", "5", "--marked-protocol"], root)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--exe", type=Path, required=True)
@@ -531,6 +557,7 @@ def main() -> int:
 
     root = Path(__file__).resolve().parents[1]
     assert_marked_phase_failures(args.exe, root)
+    assert_warm_repeat_flag(args.exe, root)
     assert_fail_closed_inputs(args.exe, root)
     assert_computation_failure_cause(args.exe, root)
     assert_relation_search_budget_exhausted(args.exe, root)

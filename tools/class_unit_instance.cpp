@@ -18,6 +18,8 @@
 #include <silex/sunit.hpp>
 
 #include "class_unit_failure_detail.hpp"
+#include "element/element_internal.hpp"
+#include "unit/unit_internal.hpp"
 #include "ideal/ideal_access_internal.hpp"
 #include "class_group/class_group_certification_internal.hpp"
 #include "order_unit/class_unit_transaction_internal.hpp"
@@ -174,6 +176,7 @@ struct Options {
     bool profiling = false;
     bool marked_protocol = false;
     bool zeta_bf_audit = false;
+    double repeat_until_ms = 0.0;
 };
 
 constexpr const char* ready_marker = "__SILEX_BENCH_SILEX_READY__";
@@ -608,6 +611,11 @@ void print_usage(std::ostream& out) {
            "accepting analytic check; its time is excluded from "
            "target_wall_ms/target_cpu_ms except with --compute-sunit, "
            "where it falls inside them)\n"
+        << "  --repeat-until-ms N (optional warm in-process timing: after "
+           "the first call, rebuild field, orders and class group from "
+           "scratch and rerun the transaction until at least N ms have "
+           "elapsed and at least 3 repeats ran; adds a `warm_repeat` JSON "
+           "object; incompatible with --marked-protocol/--compute-sunit)\n"
         << "  --log --trace --verbose --profile\n";
 }
 
@@ -760,6 +768,16 @@ bool parse_options(int argc,
             options.zeta_bf_audit = true;
             continue;
         }
+        if (take_value(i, argc, argv, arg, "--repeat-until-ms", value)) {
+            char* end = nullptr;
+            options.repeat_until_ms = std::strtod(value.c_str(), &end);
+            if (value.empty() || *end != '\0' ||
+                !(options.repeat_until_ms > 0.0)) {
+                error = "invalid --repeat-until-ms value";
+                return false;
+            }
+            continue;
+        }
         error = "unknown option: " + arg;
         return false;
     }
@@ -774,6 +792,12 @@ bool parse_options(int argc,
     }
     if (options.mode != "proven" && options.mode != "grh") {
         error = "invalid --mode value";
+        return false;
+    }
+    if (options.repeat_until_ms > 0.0 &&
+        (options.marked_protocol || options.compute_sunit)) {
+        error = "--repeat-until-ms cannot be combined with "
+                "--marked-protocol or --compute-sunit";
         return false;
     }
     return true;
@@ -1705,6 +1729,64 @@ int main(int argc, char** argv) {
             expectation_passed(input_options, overall_success, class_group,
                                units);
 
+    // Optional warm repeats (--repeat-until-ms).  Every iteration rebuilds
+    // the number field, equation and maximal orders, compute options, class
+    // group context and unit group from the polynomial; nothing from the
+    // first call or an earlier iteration is reused.  The only process-wide
+    // state in the library is thread-local (Hensel data memos, roots of
+    // unity memo); both are emptied before each iteration.  Only the
+    // transaction is timed (field and order construction excluded).
+    slong repeat_count = 0;
+    double repeat_total_ms = 0.0;
+    double repeat_prep_total_ms = 0.0;
+    bool repeat_all_succeeded = true;
+    if (input_options.repeat_until_ms > 0.0 && compute_success) {
+        constexpr slong repeat_min_count = 3;
+        while (repeat_total_ms < input_options.repeat_until_ms ||
+               repeat_count < repeat_min_count) {
+            silex::detail::clear_hensel_data_caches();
+            silex::detail::clear_roots_of_unity_cache();
+            const auto prep_start = std::chrono::steady_clock::now();
+            silex::NumberField rfield = silex::NumberField::by_polynomial(
+                    sflint::FmpqPolyConstRef(polynomial));
+            silex::Order requation = rfield.is_defined()
+                    ? silex::Order::equation_order(rfield)
+                    : silex::Order{};
+            silex::Order rmaximal(rfield);
+            const bool rmax_defined =
+                    requation.is_defined() && rmaximal.maximal_order(requation);
+            sflint::Fmpz rbound;
+            silex::ClassGroupComputeOptions roptions;
+            const bool rok = rmax_defined &&
+                    configure_compute_options(roptions, rbound, rmaximal,
+                                              input_options);
+            silex::ClassGroupContext rclass_group;
+            silex::OrderUnitGroup runits;
+            silex::detail::ClassUnitTransactionReport rreport;
+            rreport.reset();
+            const auto run_start = std::chrono::steady_clock::now();
+            const bool rsuccess = rok &&
+                    compute_class_unit_from_options(
+                            runits, rclass_group, rmaximal,
+                            sflint::FmpzConstRef(rbound), roptions,
+                            input_options.precision, rreport);
+            const auto run_end = std::chrono::steady_clock::now();
+            repeat_prep_total_ms +=
+                    std::chrono::duration<double, std::milli>(run_start -
+                                                              prep_start)
+                            .count();
+            repeat_total_ms +=
+                    std::chrono::duration<double, std::milli>(run_end -
+                                                              run_start)
+                            .count();
+            ++repeat_count;
+            if (!rsuccess) {
+                repeat_all_succeeded = false;
+                break;
+            }
+        }
+    }
+
     if (input_options.marked_protocol && !read_protocol_phase()) {
             return print_error_json(
                     "marked protocol missing final phase input", 5);
@@ -1754,6 +1836,34 @@ int main(int argc, char** argv) {
     }
     std::cout << "    \"total\": " << elapsed_ms << "\n";
     std::cout << "  },\n";
+    if (input_options.repeat_until_ms > 0.0) {
+        std::cout << "  \"warm_repeat\": {\n";
+        std::cout << "    \"requested_until_ms\": "
+                  << input_options.repeat_until_ms << ",\n";
+        std::cout << "    \"first_class_unit_ms\": " << class_unit_ms
+                  << ",\n";
+        std::cout << "    \"repeat_count\": " << repeat_count << ",\n";
+        std::cout << "    \"repeat_total_ms\": " << repeat_total_ms
+                  << ",\n";
+        std::cout << "    \"repeat_mean_class_unit_ms\": ";
+        if (repeat_count > 0) {
+            std::cout << repeat_total_ms / static_cast<double>(repeat_count);
+        } else {
+            std::cout << "null";
+        }
+        std::cout << ",\n";
+        std::cout << "    \"repeat_mean_preparation_ms\": ";
+        if (repeat_count > 0) {
+            std::cout << repeat_prep_total_ms /
+                                 static_cast<double>(repeat_count);
+        } else {
+            std::cout << "null";
+        }
+        std::cout << ",\n";
+        std::cout << "    \"repeat_all_succeeded\": "
+                  << json_bool(repeat_all_succeeded) << "\n";
+        std::cout << "  },\n";
+    }
     std::cout << "  \"mode\": ";
     write_json_string(std::cout, input_options.mode);
     std::cout << ",\n";
