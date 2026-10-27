@@ -737,10 +737,17 @@ order, a degree-one Dedekind--Kummer prime ``(p, theta - r)`` stores the
 closed-form HNF of ``pO + (theta - r)O``, traced to Hecke
 ``Ideal.jl:basis_mat_prime_deg_1``.  A Dedekind--Kummer prime
 ``(p, g(theta))`` with a monic factor ``g`` of degree ``f > 1`` stores the
-analogous closed-form HNF of ``pO + g(theta)O``: ``Z[theta] / (p, g(theta))``
-is ``F_p[x] / (g)`` (Cohen, GTM 138, Theorem 4.8.13 and its proof), on which
-``x^(n-f), ..., x^(n-1)`` are a basis because ``x`` is a unit.  Any input
-either closed form cannot confirm takes the generic two-generator route.
+analogous closed-form HNF of ``pO + g(theta)O``.  The identification
+``Z[theta] / (p, g(theta)) = F_p[x] / (g)``, on which ``x^(n-f), ...,
+x^(n-1)`` are a basis because ``x`` is a unit, is elementary and holds for
+every ``p``, including primes dividing the index of ``Z[theta]``; Cohen, GTM
+138, Theorem 4.8.13 is the setting in which these primes arise, not a
+hypothesis the formula needs.  No upstream routine computes this HNF for
+``f > 1`` (Hecke's ``basis_mat_prime_deg_1`` covers degree one only); the
+formula and its proof are Silex's own derivation, given in the comment on
+``IdealAccess::set_known_factor_two_generator`` in ``src/ideal/ideal.cpp``.
+Any input either closed form cannot confirm takes the generic two-generator
+route.
 
 When ``p`` divides the index of the maximal order, ``decompose_prime`` splits
 the etale algebra ``O/(p, I_p)``, where ``I_p`` is the ``p``-radical (equal

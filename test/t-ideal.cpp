@@ -2683,8 +2683,10 @@ int test_known_factor_two_generator_matches_modular_hnf() {
     fmpz_poly_set_coeff_si(g.raw(), 4, 1);
     assert(!silex::detail::set_known_factor_two_generator_ideal(
             equation_ideal, sflint::FmpzConstRef(three), sflint::FmpzPolyConstRef(g)));
+    // a <= 0 alone: g = x^2 + x + 1 is accepted with a = 3 (above) but
+    // refused with a = -3.
     fmpz_poly_zero(g.raw());
-    fmpz_poly_set_coeff_si(g.raw(), 0, 2);
+    fmpz_poly_set_coeff_si(g.raw(), 0, 1);
     fmpz_poly_set_coeff_si(g.raw(), 1, 1);
     fmpz_poly_set_coeff_si(g.raw(), 2, 1);
     fmpz_neg(three.raw(), three.raw());

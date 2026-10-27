@@ -10,6 +10,7 @@
 #include <silex/diagnostics.hpp>
 #include <silex/flint/fmpq_mat.hpp>
 #include <silex/flint/fmpq_poly.hpp>
+#include <silex/flint/fmpz_vec.hpp>
 #include <silex/flint/fmpz_mod_ctx.hpp>
 #include <silex/flint/fmpz_mod_mat.hpp>
 #include <silex/lat.hpp>
@@ -1925,11 +1926,14 @@ bool IdealAccess::set_known_factor_two_generator(
 
     // Source trace: the degree-f analogue of set_known_linear_two_generator
     // above (reference v0.39.19 `Ideal.jl:basis_mat_prime_deg_1`, lines
-    // 459-477, writes the basis of a degree-one prime from O / P = F_p).  For
-    // a Dedekind-Kummer prime P = (p, g(theta)) of residue degree f, Cohen,
-    // GTM 138, Theorem 4.8.13 and its proof identify Z[theta] / P with
-    // F_p[x] / (g); the closed form below needs only the lattice statement,
-    // shown here for every a > 0.
+    // 459-477, writes the basis of a degree-one prime from O / P = F_p).
+    // That routine covers degree one only; no upstream routine computes this
+    // HNF for f > 1, so the closed form below is derived here.  Dedekind-
+    // Kummer primes P = (p, g(theta)) of residue degree f arise in the
+    // setting of Cohen, GTM 138, Theorem 4.8.13, but the formula does not
+    // use that theorem or its hypothesis that p does not divide the index:
+    // the identification of Z[theta] / (a, g(theta)) with (Z / a)[x] / (g)
+    // is elementary and is shown below for every a > 0.
     //
     // When g | F modulo a, f(theta) -> f mod (a, g) is a well-defined
     // surjective ring map Z[theta] -> R = (Z / a)[x] / (g), and its kernel is
@@ -1950,9 +1954,12 @@ bool IdealAccess::set_known_factor_two_generator(
     // not a factor of F modulo a, or has g(0) not a unit, returns false.
     const fmpz* a = scalar_generator.raw();
     const fmpz* coefficients = fmpq_poly_numref(polynomial);
-    fmpz* reduced = _fmpz_vec_init(f + 1);
-    fmpz* remainder = _fmpz_vec_init(n + 1);
-    fmpz* power = _fmpz_vec_init(f);
+    flint::FmpzVec reduced_storage(f + 1);
+    flint::FmpzVec remainder_storage(n + 1);
+    flint::FmpzVec power_storage(f);
+    fmpz* reduced = reduced_storage.data();
+    fmpz* remainder = remainder_storage.data();
+    fmpz* power = power_storage.data();
     flint::Fmpz inverse, lead;
     bool usable = true;
     _fmpz_vec_scalar_mod_fmpz(reduced, factor.raw()->coeffs, f + 1, a);
@@ -2008,9 +2015,6 @@ bool IdealAccess::set_known_factor_two_generator(
                                           reduced, f,
                                           flint::FmpzMatConstRef(hnf)));
     }
-    _fmpz_vec_clear(reduced, f + 1);
-    _fmpz_vec_clear(remainder, n + 1);
-    _fmpz_vec_clear(power, f);
     if (!usable) {
         return false;
     }
