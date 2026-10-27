@@ -121,6 +121,9 @@ ulong cyclotomic_polynomial_index(const flint::FmpzPoly& polynomial) noexcept {
 
 // The gcd of the degrees of the irreducible factors of `polynomial` modulo
 // the prime p, or 0 when that reduction is constant or not squarefree.
+// Callers pass the monic integral model of the defining polynomial, so the
+// reduction keeps its degree.  For a non-monic polynomial with p dividing the
+// leading coefficient, the result is that of the degree-dropped reduction.
 //
 // Source trace: reference 2.17.3 src/basemath/nffactor.c `guess_roots`
 // (lines 1999-2039) reduces T to a word-size Flx and reads the gcd from the
@@ -139,8 +142,11 @@ ulong factor_residue_degree_gcd(const fmpz_poly_struct* polynomial,
         return 0;
     }
 
-    // nmod_poly_factor_distinct_deg makes its own monic copy and writes one
-    // degree per nonconstant factor, at most `degree` of them.
+    // nmod_poly_factor_distinct_deg documents a monic input; scaling by the
+    // inverse leading coefficient keeps the factor degrees and is a no-op for
+    // the monic production inputs.  It writes one degree per nonconstant
+    // factor, at most `degree` of them.
+    nmod_poly_make_monic(reduced.raw(), reduced.raw());
     flint::NmodPolyFactor factorization;
     std::vector<slong> degrees(static_cast<std::size_t>(degree));
     slong* degree_data = degrees.data();

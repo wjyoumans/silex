@@ -31,7 +31,10 @@ bool roots_of_unity_for_bound(flint::FmpzRef order,
 // The gcd of the degrees of the irreducible factors of `polynomial` modulo
 // the prime `p`, read from FLINT's distinct-degree factorization as in the
 // good-prime step of roots_of_unity; 0 when the reduction is constant or not
-// squarefree, when `polynomial` is null, or when p < 2.  Exposed for tests.
+// squarefree, when `polynomial` is null, or when p < 2.  Callers pass a monic
+// integral model; for a non-monic polynomial with p dividing the leading
+// coefficient, the result is that of the degree-dropped reduction.  Exposed
+// for tests.
 ulong residue_degree_gcd(const fmpz_poly_struct* polynomial,
                          ulong p) noexcept;
 
