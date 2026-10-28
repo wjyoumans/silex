@@ -132,6 +132,24 @@ Added
 
 Changed
 -------
+- ``Ideal::multiply`` on a maximal order, when the two-generator search for
+  the product fails, now takes a modular Hermite normal form of the ``n^2``
+  basis products modulo the product of the two ideal minima
+  (``fmpz_mat_hnf_modular_eldiv``) instead of an exact HNF; the modulus lies
+  in the product ideal, so the result is the same unique HNF.  ``grh``
+  outputs, with timing keys removed, are identical on 60 corpus rows.
+  Whole-process callgrind Ir of ``grh`` (busy machine) drops by 5.15% on
+  ``multiquadratic_m23_m31_m47``; ``multiquadratic_m3_m5_m7`` and
+  ``multiquadratic_p5_m7_m11`` do not reach the fallback and are unchanged.
+
+- ``ClassGroupContext`` no longer deep-copies the relation module's HNF
+  checkpoint into the row module on every relation publish; the checkpoint
+  is lent by exchange and taken back before the next change.  HNF contents
+  and rebuild order are unchanged, and ``grh`` outputs and relation logs are
+  identical on 171 corpus rows.  Whole-process callgrind Ir of ``grh`` (busy
+  machine) drops by 4.08% on ``simplest_cubic_a12`` (1.67% on
+  ``simplest_cubic_a5``, 0.68% on ``lmfdb_8_8_73116160000_2``).
+
 
 - ``proven`` class/unit computations on an imaginary quadratic field with
   ``2^44 <= |D| < 2^54`` count the reduced forms of the fundamental
