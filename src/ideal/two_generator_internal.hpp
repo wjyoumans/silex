@@ -55,7 +55,9 @@ bool try_ideal_product_hnf(flint::FmpzMatRef out,
 // factor it extracts from: `hnf` is the HNF of I, I = content K with K
 // primitive, K = minimum O + beta O with `minimum` the least positive
 // integer in K, and `multiplication` is the full (unreduced) multiplication
-// matrix of beta.
+// matrix of beta.  The form does not record its order: `multiplication` is
+// in the basis of the order the form was built in, so a form may be used
+// only with ideals of that order.
 struct IdealTwoGeneratorForm {
     flint::FmpzMat hnf{0, 0};
     flint::Fmpz content;
@@ -75,7 +77,9 @@ bool ideal_two_generator_form(IdealTwoGeneratorForm& out, const Ideal& ideal,
 // The HNF try_ideal_product_hnf(out, left, right) produces, with the
 // two-element form of right given instead of searched for.  right_form must
 // come from ideal_two_generator_form(right): its stored HNF is compared with
-// right's, and a mismatch fails.  The scalar and principal-generator branches
+// right's, and a mismatch fails.  right must lie in the order the form was
+// built in: only the HNF is compared, so a form from another order with an
+// equal HNF matrix would give a wrong product.  The scalar and principal-generator branches
 // of try_ideal_product_hnf, which search nothing, are taken through it.
 // Leaves out unchanged on failure.
 bool try_ideal_product_hnf_with_form(flint::FmpzMatRef out, const Ideal& left,

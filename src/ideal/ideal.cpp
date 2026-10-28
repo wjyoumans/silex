@@ -1814,6 +1814,8 @@ bool try_ideal_product_hnf_with_form(flint::FmpzMatRef out, const Ideal& left,
     OrderElement one(*parent);
     if (!one.one() || !one.get_coordinates(flint::FmpzMatRef(one_coordinates)) ||
         !ideal_minimum(mh, flint::FmpzMatConstRef(one_coordinates), flint::FmpzMatConstRef(h))) return false;
+    // Source trace: reference `base4.c:idealHNF_mul_two` returns
+    // ZM_hnfmodid([x a; M_alpha x], a * x[1,1]).
     // The rows mk H and H M_beta span h (mk O + beta O) = h k for the
     // primitive parts h of left and k of right, because
     // ideal_two_generator_form verified k = mk O + beta O, and mh mk lies in

@@ -275,7 +275,11 @@ bool ideal_hnf_equal(const silex::Ideal& left,
 // x^3 - x^2 - 2x - 8 has 2 as a common index divisor: 2 splits into three
 // primes of norm 2, none with a Kummer generator, so their forms come from
 // the search alone.  Inputs include O, every prime, products whose minimum
-// (2) is below the prime's, and a square of a prime above 2.
+// (2) is below the prime's, and a square of a prime above 2.  The field
+// discriminant is -503, so the primes above 503 include a ramified one.
+// Where the form path applies, its HNF is also compared with the n^2
+// basis-product HNF (basis_product_hnf), which does not use the
+// two-element route.
 int test_factor_base_prime_form_product_matches_ideal_multiply() {
     sflint::FmpqPoly polynomial;
     sflint::fmpq_poly_zero(polynomial);
@@ -292,7 +296,7 @@ int test_factor_base_prime_form_product_matches_ideal_multiply() {
     std::vector<silex::PrimeIdeal> primes;
     std::vector<silex::Ideal> prime_ideals;
     for (slong p : {WORD(2), WORD(3), WORD(5), WORD(7), WORD(11),
-                    WORD(13)}) {
+                    WORD(13), WORD(503)}) {
         sflint::Fmpz rational_prime;
         set_si(rational_prime, p);
         silex::PrimeIdealList factors;
@@ -308,6 +312,11 @@ int test_factor_base_prime_form_product_matches_ideal_multiply() {
     }
     // The three primes above 2 come first.
     assert(prime_ideals.size() > 3);
+    bool has_ramified = false;
+    for (const silex::PrimeIdeal& prime : primes) {
+        if (prime.ramification_index() > 1) has_ramified = true;
+    }
+    assert(has_ramified);
     sflint::FmpzMat coordinates(1, order.degree());
     for (std::size_t i = 0; i < 3; ++i) {
         sflint::Fmpz p;
@@ -353,6 +362,31 @@ int test_factor_base_prime_form_product_matches_ideal_multiply() {
                                        static_cast<slong>(i), forms));
                 assert(actual.equal(expected));
                 assert(ideal_hnf_equal(actual, expected));
+                if (!forms.at(i).has_form) continue;
+                // The form path itself succeeds, not only the fallback.
+                const slong n = order.degree();
+                sflint::FmpzMat form_hnf(n, n), basis_hnf(n, n),
+                        expected_hnf(n, n);
+                const bool form_ok =
+                        silex::detail::try_ideal_product_hnf_with_form(
+                                sflint::FmpzMatRef(form_hnf), input,
+                                prime_ideals.at(i), forms.at(i).form);
+                if (input.known_principal_generator() == nullptr &&
+                    prime_ideals.at(i).known_principal_generator() ==
+                            nullptr) {
+                    assert(form_ok);
+                }
+                if (!form_ok) continue;
+                assert(expected.get_hnf(sflint::FmpzMatRef(expected_hnf)));
+                assert(sflint::fmpz_mat_equal(
+                        sflint::FmpzMatConstRef(form_hnf),
+                        sflint::FmpzMatConstRef(expected_hnf)));
+                assert(silex::detail::basis_product_hnf(
+                        sflint::FmpzMatRef(basis_hnf), input,
+                        prime_ideals.at(i)));
+                assert(sflint::fmpz_mat_equal(
+                        sflint::FmpzMatConstRef(form_hnf),
+                        sflint::FmpzMatConstRef(basis_hnf)));
             }
         }
         assert(forms.size() == i + 1);
