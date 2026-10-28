@@ -92,7 +92,7 @@ struct OrderData {
     // Residue degrees above rational primes read from the defining
     // polynomial, filled through
     // OrderAccess::store_defining_polynomial_residue_degrees (they depend
-    // only on the parent field, like the index above).  Entries are sorted
+    // on the parent field only).  Entries are sorted
     // by p; entry k holds the degrees
     // defining_polynomial_residue_degrees_[offset, offset + length).
     struct DefiningPolynomialResidueDegreeEntry {

@@ -1,6 +1,7 @@
 #include <flint/ulong_extras.h>
 
 #include <silex/factor_base.hpp>
+#include <silex/flint/fmpq_mat.hpp>
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/flint/fmpz.hpp>
 #include <silex/flint/fmpz_poly.hpp>
@@ -14,6 +15,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -798,7 +800,7 @@ int test_norm_bounded_build_skips_primes_over_the_bound() {
 // 3 the polynomial is (x^2 + x + 2)(x^2 + 2x + 2), modulo 5 it is
 // irreducible (2 has order 4 in F_5^*), and modulo 7 it is
 // (x - 2)(x - 5)(x^2 + 4).  The discriminant divisor 2 fails the route's
-// gate and is never stored.
+// gate and is never stored, and neither is an unramified index divisor.
 int test_defining_polynomial_residue_degrees_shared_by_order() {
     const slong coefficients[] = {-2, 0, 0, 0, 1};
     silex::NumberField quartic = monic_field(coefficients, 4);
@@ -867,6 +869,48 @@ int test_defining_polynomial_residue_degrees_shared_by_order() {
             assert(other_route.residue_degrees(degrees, *other, primes[i]));
             assert(degrees == expected[i]);
         }
+    }
+
+    // Order::set_basis builds new order data, which starts with nothing
+    // stored; the order it was copied from keeps its entries.
+    silex::Order rebased = maximal;
+    const std::optional<sflint::FmpqMat> maximal_basis = maximal.basis();
+    assert(maximal_basis.has_value());
+    assert(rebased.set_basis(sflint::FmpqMatConstRef(*maximal_basis)));
+    assert(!rebased.has_same_data(maximal));
+    for (const ulong p : primes) {
+        assert(!silex::detail::OrderAccess::
+                       defining_polynomial_residue_degrees(stored, rebased,
+                                                           p));
+    }
+    assert(silex::detail::OrderAccess::defining_polynomial_residue_degrees(
+            stored, maximal, 3));
+
+    // A prime dividing the equation-order index but not the discriminant
+    // fails the gate's index check and is never stored.  x^4 - 8x - 16 is
+    // 16 g(x/2) for g = x^4 - x - 1, so its discriminant is 2^12 (-283)
+    // and the maximal order, of discriminant -283, holds Z[theta] with
+    // index 2^6.  3 is unramified and is stored as for any other prime.
+    {
+        const slong scaled[] = {-16, -8, 0, 0, 1};
+        silex::NumberField field = monic_field(scaled, 4);
+        silex::Order scaled_equation = silex::test::equation_order(field);
+        silex::Order scaled_maximal(field);
+        assert(scaled_maximal.maximal_order(scaled_equation));
+        sflint::Fmpz discriminant;
+        assert(scaled_maximal.discriminant(sflint::FmpzRef(discriminant)));
+        assert(sflint::fmpz_equal_si(discriminant, -283));
+        silex::detail::DefiningPolynomialResidueDegrees scaled_route;
+        assert(scaled_route.init(scaled_maximal));
+        assert(!scaled_route.residue_degrees(degrees, scaled_maximal, 2));
+        assert(!silex::detail::OrderAccess::
+                       defining_polynomial_residue_degrees(
+                               stored, scaled_maximal, 2));
+        assert(scaled_route.residue_degrees(degrees, scaled_maximal, 3));
+        assert(silex::detail::OrderAccess::
+                       defining_polynomial_residue_degrees(
+                               stored, scaled_maximal, 3));
+        assert(stored == degrees);
     }
 
     // The GRH factor-base bound search stores, in the order data it
