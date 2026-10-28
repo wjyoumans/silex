@@ -13,10 +13,12 @@
 #include "../factor_base/factor_base_internal.hpp"
 #include "../relation/relation_internal.hpp"
 #include "relation_completion_scheduler_internal.hpp"
+#include "relation_factor_base_plan_internal.hpp"
 #include "relation_search_internal.hpp"
 #include "../order_unit/class_unit_transaction_internal.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -1342,6 +1344,27 @@ ClassGroupContext::run_maximal_imaginary_quadratic_relation_backend_(
                 detail::RelationSearchBudgetCap::max_relations);
         return SpecializedRelationBackendStatus::failed;
     }
+
+#ifndef NDEBUG
+    {
+        // Debug check of the step between the specialized plan and the
+        // comparison below: the bound the transaction built the factor base
+        // with is the plan's working bound.  Together with the assertion in
+        // specialize_maximal_imaginary_quadratic_factor_base_plan, this keeps
+        // the fail-closed branch below unreachable from a production plan.
+        const detail::RelationFactorBasePlan* const plan =
+                class_unit_transaction_context_ != nullptr
+                        ? class_unit_transaction_context_
+                                  ->relation_factor_base_plan
+                        : nullptr;
+        if (plan != nullptr && plan->valid &&
+            plan->order.has_same_data(order)) {
+            assert(flint::fmpz_equal(
+                    factor_base_bound,
+                    flint::FmpzConstRef(plan->working_bound)));
+        }
+    }
+#endif
 
     flint::Fmpz required_generation_bound;
     if (!factor_base_class_group_bound(
