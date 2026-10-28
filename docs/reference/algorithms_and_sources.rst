@@ -961,6 +961,27 @@ multiple of the residue degree; otherwise, and for blocks that miss a prime
 above ``p`` (a norm-bounded base, for example), the valuation is computed,
 so the exponent rows are unchanged.
 
+When ``N(alpha)`` divides out completely over the factor base's rational
+primes, a partial relation of the class-group search can still have one
+large prime: a prime above some ``p`` of the base that the block of ``p``
+misses.  The same norm accounting locates it without factoring
+``alpha O_K``.  The valuations of ``alpha`` at the base primes above each
+``p`` leave a deficit, ``v_p(N(alpha))`` minus the base primes' ``f v``, and
+that deficit is the sum of ``f v`` over the primes above ``p`` outside the
+base.  No deficit means no prime outside the base.  Deficits at two
+rational primes mean two distinct primes outside the base.  Either way the
+element is not a one-large-prime partial, as the full factorization finds.
+With one deficient ``p``, only ``p`` is decomposed.  The first prime above
+``p`` outside the base with positive valuation is the large prime exactly
+when its valuation is 1 and its residue degree equals the deficit; otherwise
+another prime outside the base, or an exponent other than 1, rejects the
+element.  The decomposition and the valuation are the ones the full
+factorization uses (``decompose_prime`` and the element valuation with
+``v_p(N(alpha))`` that ``PrimeIdeal::valuation`` takes for a principal
+ideal), so the row and the large prime are unchanged.  PARI 2.17.3
+``src/basemath/buch2.c:divide_p_elt`` does the same per-prime norm
+accounting.
+
 Class groups and order units
 ----------------------------
 

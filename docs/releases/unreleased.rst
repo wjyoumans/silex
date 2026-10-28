@@ -1706,6 +1706,21 @@ Changed
   ``grh`` mode, callgrind instruction counts fall 4.5%.  See "Local algebra
   and relations" in :doc:`../reference/algorithms_and_sources`.
 
+- On a maximal equation order, a class-group partial relation whose norm
+  divides out completely over the factor base's rational primes no longer
+  factors the principal ideal to find its large prime.  The base-prime
+  valuations leave a norm deficit over at most one rational prime ``p``; only
+  ``p`` is decomposed, and the large prime is the prime above ``p`` outside
+  the base with valuation 1 and residue degree equal to the deficit.
+  Deficits over two primes, no deficit, or an exponent other than 1 discard
+  the element, as the full factorization does.  ``grh`` outputs, with timing
+  keys removed and including ``skipped_dependent_relation_count``, are
+  identical on 171 corpus rows.  Whole-process callgrind Ir of ``grh`` drops
+  by 5.85% on ``nonadecic_x19_minus_x_minus_1``, 9.46% on
+  ``tridecic_x13_minus_x_minus_1`` and 5.46% on
+  ``septendecic_x17_minus_x_minus_1``.  See "Local algebra and relations" in
+  :doc:`../reference/algorithms_and_sources`.
+
 - The ``proven`` analytic finish no longer computes the HNF transform of
   the relation matrix at every check.  It checks the relation rank with
   ``fmpz_mat_rank`` and computes the transform only when the LLL kernel
