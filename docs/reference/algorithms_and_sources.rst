@@ -2210,8 +2210,9 @@ without building them, in ``src/class_group/reduced_form_count.cpp``:
   sieve over these ``a``; a root is counted when ``(a, b, c)`` is reduced:
   ``|b| <= a <= c``, and ``b >= 0`` when ``|b| = a`` or ``a = c`` (Cohen,
   Definition 5.3.2).  The count fails closed if the factorisation does not
-  rebuild ``a`` or the number of combined roots differs from the product
-  ``R(4a)``.
+  rebuild ``a``, the number of combined roots differs from the product
+  ``R(4a)``, or FLINT returns a root set that a fundamental ``D`` does not
+  allow.
 
 FLINT is called only as a library; no FLINT code is ported.  FLINT 3.6.0
 ``qfb_reduced_forms`` (``qfb/reduced_forms.c``), which lists the forms, is

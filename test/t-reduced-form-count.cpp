@@ -90,7 +90,7 @@ void check_against_listing() noexcept {
 }
 
 // Discriminants with many small prime factors, so the band a >= sqrt(|D|) / 2
-// meets many odd prime powers and every 2-power exponent: the count, whose
+// meets many odd prime powers and several 2-power exponents: the count, whose
 // band roots are the CRT combinations of the cached prime-power roots,
 // equals FLINT's listing.
 void check_smooth_discriminants() noexcept {
