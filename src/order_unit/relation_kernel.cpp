@@ -1246,9 +1246,11 @@ struct WordQuotientLogTarget {
 
 // One slot of the baby-step table of word_quotient_log_baby_giant:
 // zeta^exponent, or an empty slot when value is kWordQuotientLogEmptySlot.
+// No default member initializers: the table is allocated uninitialized and
+// then filled once with empty slots.
 struct WordQuotientLogBabyStep {
-    ulong value = 0;
-    ulong exponent = 0;
+    ulong value;
+    ulong exponent;
 };
 
 // Marks an empty slot of the baby-step table.  Every baby step and every
@@ -1352,9 +1354,11 @@ bool word_quotient_log_baby_giant(
     if (table == nullptr) {
         return false;
     }
-    WordQuotientLogBabyStep empty;
-    empty.value = kWordQuotientLogEmptySlot;
-    std::fill_n(table.get(), mask + 1, empty);
+    WordQuotientLogBabyStep* const slots = table.get();
+    for (std::size_t k = 0; k <= mask; ++k) {
+        slots[k].value = kWordQuotientLogEmptySlot;
+        slots[k].exponent = 0;
+    }
     ulong current = 1 % p_ui;
     for (ulong j = 0; j <= m; ++j) {
         // zeta^0, ..., zeta^m are distinct because m < ell, the order of
