@@ -12364,9 +12364,10 @@ constexpr ulong kGeneratorAssociateSolvePrime = UWORD(4611686018427387847);
 // equal-norm entry tried, while a skip saves one factoring; in fields with
 // many equal-norm conjugates (cyclotomic) most tries miss.  Measured over
 // the class-unit corpus in grh mode (instruction counts, pre-check on
-// against off): net savings for n <= 7 (-2.2% at n = 3 to 5), a net loss
-// from n = 8 on (+0.3% at n = 8, +4% at n = 12, +15% at n = 20 to 24, about
-// 2x on cyclotomic_64_phi32 and cyclotomic_real_136_deg32).  The cap only
+// against off): net savings for n <= 7 (-2% to -3.3% at n = 3 to 5), a net
+// loss in total over n >= 8 (+0.3% at n = 8, n = 9 about neutral at -0.2%,
+// +0.4% at n = 10, +4% at n = 12, +15% at n = 20 to 24, about 2x on
+// cyclotomic_64_phi32 and cyclotomic_real_136_deg32).  The cap only
 // selects whether the pre-check runs; every candidate it would skip reaches
 // the same duplicate skip on the full path.
 constexpr slong kGeneratorAssociateMaxDegree = 7;
