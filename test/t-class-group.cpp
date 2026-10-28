@@ -9705,6 +9705,75 @@ int test_relation_saturation_beta_rows_size_reduced() {
         assert(rank == static_cast<ulong>(rows));
         assert(raw_columns.size() > 1);
     }
+    {
+        // Rows solved for one presentation are kept until it changes.  The
+        // context's class_group debug checks run here (in builds with debug
+        // checks), including the one on the stored rows' column count.
+        silex::DiagnosticsContext diagnostics;
+        diagnostics.debug_level = silex::DebugLevel::cheap;
+        diagnostics.debug_modules = silex::diagnostics_module_bit(
+                silex::DiagnosticsModule::class_group);
+        slong debug_failures = 0;
+        diagnostics.debug_failure_user = &debug_failures;
+        diagnostics.debug_failure_callback =
+                [](void* user, silex::DiagnosticsModule, silex::DebugLevel,
+                   const char*, const char*, int, const char*,
+                   const char*) noexcept { ++*static_cast<slong*>(user); };
+        context.set_diagnostics(&diagnostics);
+
+        sflint::Fmpz two;
+        sflint::Fmpz fifty_three;
+        sflint::fmpz_set_si(sflint::FmpzRef(two), 2);
+        sflint::fmpz_set_si(sflint::FmpzRef(fifty_three), 53);
+        // The order is 212 = 2^2 * 53: some invariant divisible by 2 is
+        // not divisible by 53 and some is divisible by both, so the rows for
+        // 2 after those for 53 are partly stored and partly solved.
+        bool shared = false;
+        bool two_only = false;
+        for (slong i = 0; i < context.invariant_count(); ++i) {
+            assert(context.invariant(sflint::FmpzRef(value), i));
+            const bool by_two = sflint::fmpz_divisible(
+                    sflint::FmpzConstRef(value), sflint::FmpzConstRef(two));
+            const bool by_fifty_three = sflint::fmpz_divisible(
+                    sflint::FmpzConstRef(value),
+                    sflint::FmpzConstRef(fifty_three));
+            shared = shared || (by_two && by_fifty_three);
+            two_only = two_only || (by_two && !by_fifty_three);
+        }
+        assert(shared && two_only);
+
+        // Republishing the presentation empties the store: the next call
+        // solves again, here every row for 2 at once.
+        const slong runs =
+                silex::detail::TestHookAccess::saturation_beta_solve_runs();
+        assert(context.publish_presentation());
+        sflint::FmpzMat solved_at_once(0, 0);
+        assert(silex::detail::relation_saturation_beta_coefficients(
+                solved_at_once, context, units, sflint::FmpzConstRef(two)));
+        assert(silex::detail::TestHookAccess::saturation_beta_solve_runs() ==
+               runs + 1);
+
+        // Again from an empty store, first the rows for 53, then those for
+        // 2: one solve each, the second only for the rows not yet stored,
+        // and the same rows as the solve of all of them at once.
+        assert(context.publish_presentation());
+        sflint::FmpzMat first(0, 0);
+        assert(silex::detail::relation_saturation_beta_coefficients(
+                first, context, units, sflint::FmpzConstRef(fifty_three)));
+        assert(silex::detail::TestHookAccess::saturation_beta_solve_runs() ==
+               runs + 2);
+        sflint::FmpzMat partly_stored(0, 0);
+        assert(silex::detail::relation_saturation_beta_coefficients(
+                partly_stored, context, units, sflint::FmpzConstRef(two)));
+        assert(silex::detail::TestHookAccess::saturation_beta_solve_runs() ==
+               runs + 3);
+        assert(sflint::fmpz_mat_equal(
+                sflint::FmpzMatConstRef(partly_stored),
+                sflint::FmpzMatConstRef(solved_at_once)));
+
+        context.set_diagnostics(nullptr);
+        assert(debug_failures == 0);
+    }
     // The fixture exercises the reduction: some raw row is not size-reduced.
     assert(!raw_size_reduced);
 

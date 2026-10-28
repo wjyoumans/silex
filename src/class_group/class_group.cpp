@@ -6353,6 +6353,14 @@ public:
             storage->saturation_relation_solved_row_valid.assign(stored,
                                                                  false);
         }
+        // The relation count cannot change without an invalidation, which
+        // empties the store, so a kept store has one column per relation.
+        SILEX_DEBUG_CHECK(
+                context.diagnostics_, DiagnosticsModule::class_group,
+                DebugLevel::cheap,
+                "stored solved relation rows match the relation count",
+                flint::fmpz_mat_ncols(flint::FmpzMatConstRef(
+                        storage->saturation_relation_solved_rows)) == n);
         std::vector<slong> missing;
         for (const slong i : indices) {
             if (i < 0 || i >= invariant_count) {
