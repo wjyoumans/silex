@@ -7114,6 +7114,61 @@ int test_word_quotient_logs_match_walk_and_sorted_baby_giant() {
                    : 1;
 }
 
+// The baby-step table for a prime ell of 47 bits would need 2^25 slots, past
+// the 2^24-slot cap (kWordQuotientLogBabyGiantMaxIndexBits in
+// relation_kernel.cpp), so word_quotient_log_resolve keeps the shared walk
+// even though ell is prime and zeta has order ell.  The images are small
+// powers of zeta, so the walk stops after a few steps; it must return their
+// exponents.
+int test_word_quotient_logs_large_ell_keeps_walk() {
+    const ulong ell = n_nextprime(UWORD(1) << 46, 1);
+    assert(FLINT_BIT_COUNT(ell) == 47);
+    ulong p = 0;
+    for (ulong k = 2;; k += 2) {
+        if (n_is_prime(k * ell + 1) != 0) {
+            p = k * ell + 1;
+            break;
+        }
+    }
+    const ulong p_inverse = n_preinvert_limb(p);
+    ulong zeta = 1;
+    for (ulong g = 2; zeta == 1; ++g) {
+        zeta = n_powmod2_ui_preinv(g, (p - 1) / ell, p, p_inverse);
+    }
+    assert(n_powmod2_ui_preinv(zeta, ell, p, p_inverse) == 1);
+    const ulong exponents[] = {0, 1, 5, 3};
+    std::vector<ulong> images;
+    for (const ulong e : exponents) {
+        images.push_back(n_powmod2_ui_preinv(zeta, e, p, p_inverse));
+    }
+    std::vector<ulong> logs;
+    std::vector<bool> resolved;
+    const unsigned long walk_before =
+            silex::detail::TestHookAccess::word_quotient_log_walk_calls();
+    const unsigned long bsgs_before =
+            silex::detail::TestHookAccess::word_quotient_log_baby_giant_calls();
+    const bool ok = silex::detail::TestHookAccess::word_quotient_logs(
+            logs, resolved, images, zeta, p, ell);
+    const unsigned long walk_after =
+            silex::detail::TestHookAccess::word_quotient_log_walk_calls();
+    const unsigned long bsgs_after =
+            silex::detail::TestHookAccess::word_quotient_log_baby_giant_calls();
+    assert(ok);
+    assert(walk_after - walk_before == 1u);
+    assert(bsgs_after - bsgs_before == 0u);
+    if (!ok || walk_after - walk_before != 1u ||
+        bsgs_after - bsgs_before != 0u || logs.size() != images.size()) {
+        return 1;
+    }
+    for (std::size_t j = 0; j < images.size(); ++j) {
+        assert(resolved[j] && logs[j] == exponents[j]);
+        if (!resolved[j] || logs[j] != exponents[j]) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 int test_direct_degree_one_residue_dlog_matrix_matches_residue_field() {
     silex::OrderUnitGroup group = real_quadratic_unit_group();
     const silex::Order* order = group.parent();
@@ -16611,6 +16666,7 @@ int main() {
     test_residue_quotient_log_column_route_follows_the_bit_cutoff();
     test_residue_quotient_log_column_walk_fallbacks_at_seven_bits();
     test_word_quotient_logs_match_walk_and_sorted_baby_giant();
+    test_word_quotient_logs_large_ell_keeps_walk();
     test_half_integral_direct_degree_one_residue_dlog_matches_residue_field();
     test_select_saturation_proof_primes();
     test_unit_proof_records();

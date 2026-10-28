@@ -1353,6 +1353,13 @@ Changed
   fewer).
 
 - The baby-step giant-step quotient logarithms of the unit saturation proof
+  are taken only while their baby-step table fits in 2^24 slots (256 MiB,
+  ``ell`` below about 2^46); a larger ``ell`` keeps the linear walk.  Before,
+  an ``ell`` near 2^64 would have asked for a table of tens of GB and an
+  allocation failure would have terminated the process.  Logarithms and
+  published results are unchanged.
+
+- The baby-step giant-step quotient logarithms of the unit saturation proof
   (word-size degree-one primes, ``ell`` of 7 bits or more) look up their baby
   steps in a hash table, as the reference's ``baby_step_giant_step`` does with
   its ``Dict``, instead of a sorted array searched by binary search, and

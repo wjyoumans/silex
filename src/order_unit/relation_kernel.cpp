@@ -1268,6 +1268,29 @@ constexpr ulong kWordQuotientLogEmptySlot = UWORD_MAX;
 // the same.
 constexpr flint_bitcnt_t kWordQuotientLogBabyGiantBits = 7;
 
+// Index bits of the baby-step hash table of word_quotient_log_baby_giant for
+// m = isqrt(ell) + 1 baby steps: the least index_bits >= 4 with
+// 2^index_bits >= 2 (m + 1), so the table is at most half full.
+flint_bitcnt_t word_quotient_log_baby_giant_index_bits(ulong ell) noexcept {
+    const ulong m = n_sqrt(ell) + 1;
+    flint_bitcnt_t index_bits = 4;
+    while ((std::size_t{1} << index_bits) <
+           2 * (static_cast<std::size_t>(m) + 1)) {
+        ++index_bits;
+    }
+    return index_bits;
+}
+
+// Resource cap (cost only, no reference counterpart): baby-step giant-step
+// is taken only while its table has at most 2^24 slots of 16 bytes (256 MiB,
+// ell below about 2^46).  For a larger ell the table would grow toward tens
+// of GB as ell nears 2^64, and an allocation failure inside these noexcept
+// routines would terminate the process instead of failing closed.  Such an
+// ell takes the shared walk, the route every ell took before baby-step
+// giant-step, which returns the same unique logarithm in [0, ell) without
+// a table.
+constexpr flint_bitcnt_t kWordQuotientLogBabyGiantMaxIndexBits = 24;
+
 // Quotient logs of `pending` by baby-step giant-step with one baby-step
 // table, as reference `baby_step_giant_step`
 // (NumFieldOrd/NfOrd/ResidueRingMultGrp.jl:716-738 at the same revision): m =
@@ -1295,12 +1318,10 @@ void word_quotient_log_baby_giant(
     // table: open addressing with linear probing, at most half full, indexed
     // by the top bits of value times the 64-bit golden-ratio constant.  A
     // lookup only answers whether a value is a baby step and with which
-    // exponent, so the table layout never changes a logarithm.
-    flint_bitcnt_t index_bits = 4;
-    while ((std::size_t{1} << index_bits) <
-           2 * (static_cast<std::size_t>(m) + 1)) {
-        ++index_bits;
-    }
+    // exponent, so the table layout never changes a logarithm.  The caller
+    // has checked index_bits against kWordQuotientLogBabyGiantMaxIndexBits.
+    const flint_bitcnt_t index_bits =
+            word_quotient_log_baby_giant_index_bits(ell_ui);
     const std::size_t mask = (std::size_t{1} << index_bits) - 1;
     const auto slot_of = [index_bits](ulong value) noexcept {
         return static_cast<std::size_t>(
@@ -1367,9 +1388,11 @@ void word_quotient_log_baby_giant(
 // respect to zeta, written into the rows of `out` that each target names and
 // marked in `resolved`: the first exponent i in [0, ell) with zeta^i equal
 // to the image, found by one walk over the powers of zeta shared by every
-// target or, from kWordQuotientLogBabyGiantBits on, when ell is prime and
-// zeta has order ell, by word_quotient_log_baby_giant, which gives the same
-// unique exponent.  A target with no match below ell is left unresolved.
+// target or, from kWordQuotientLogBabyGiantBits on, when ell is prime,
+// zeta has order ell and the baby-step table fits
+// kWordQuotientLogBabyGiantMaxIndexBits, by word_quotient_log_baby_giant,
+// which gives the same unique exponent.  A target with no match below ell is
+// left unresolved.
 void word_quotient_log_resolve(
         flint::FmpzMat& out,
         std::vector<bool>& resolved,
@@ -1384,6 +1407,8 @@ void word_quotient_log_resolve(
 
     const ulong p_inverse = n_preinvert_limb(p_ui);
     if (FLINT_BIT_COUNT(ell_ui) >= kWordQuotientLogBabyGiantBits &&
+        word_quotient_log_baby_giant_index_bits(ell_ui) <=
+                kWordQuotientLogBabyGiantMaxIndexBits &&
         zeta != 1 && n_is_prime(ell_ui) != 0 &&
         n_powmod2_ui_preinv(zeta, ell_ui, p_ui, p_inverse) == 1) {
         ComputeTestSeams::count_word_quotient_log_baby_giant();

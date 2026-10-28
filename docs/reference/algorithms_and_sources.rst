@@ -2967,7 +2967,10 @@ generator has order ``ell``, so both routes return the unique logarithm in
 ``cache`` ``Dict``, in a hash table (open addressing, at most half full), and
 the fixed baby and giant step factors are applied with FLINT's
 ``n_mulmod_shoup`` when ``p < 2^(FLINT_BITS - 1)``.  Neither choice changes a
-logarithm.
+logarithm.  As a resource cap with no Hecke counterpart, baby-step giant-step
+is taken only while its table has at most ``2^24`` slots (256 MiB, ``ell``
+below about ``2^46``); a larger ``ell`` keeps the shared walk, which returns
+the same logarithm without the table.
 
 ``ResidueFieldQuotientLog::apply`` returns, for ``x`` in ``F_q^*`` with
 ``q = p^f``, the ``i`` in ``[0, ell)`` with ``zeta^i = x^((q - 1)/ell)``,
