@@ -3225,6 +3225,101 @@ int test_direct_partial_row_deduced_last_valuation() {
     return 0;
 }
 
+struct SmoothNormPartialCounts {
+    slong found = 0;
+    slong two_primes = 0;
+    slong exponent_not_one = 0;
+};
+
+// Checks the smooth-norm partial of the order element with `coordinates`
+// against the full factorization of its principal ideal, and counts the
+// outcome.  Elements whose norm is a unit or not smooth over the base's
+// rational primes are skipped.
+void check_smooth_norm_partial(SmoothNormPartialCounts& counts,
+                               const silex::NumberField& field,
+                               const silex::Order& maximal_order,
+                               const silex::FactorBase& base,
+                               sflint::FmpzConstRef bound,
+                               sflint::FmpzMatConstRef coordinates) noexcept {
+    using Outcome = silex::detail::TestHookAccess::SmoothNormOutcome;
+    silex::OrderElement order_element(maximal_order);
+    silex::Element element(field);
+    sflint::Fmpq norm;
+    sflint::Fmpz leftover;
+    sflint::Fmpz block_prime;
+    sflint::FmpzMat row(0, 0);
+    sflint::FmpzMat full_row(1, base.length());
+    silex::PrimeIdeal prime(maximal_order);
+    silex::PrimeIdeal factor_prime(maximal_order);
+    silex::PrimeIdeal full_prime(maximal_order);
+    assert(order_element.set_coordinates(coordinates));
+    assert(order_element.get_element(element));
+    assert(element.norm(sflint::FmpqRef(norm)));
+    sflint::fmpz_abs(sflint::FmpzRef(leftover),
+                     sflint::fmpq_num_ref(sflint::FmpqConstRef(norm)));
+    if (sflint::fmpz_cmp_ui(sflint::FmpzConstRef(leftover), 1) <= 0) {
+        return;
+    }
+    for (slong block = 0; block < base.rational_prime_block_count();
+         ++block) {
+        slong length = 0;
+        assert(base.rational_prime_block_data(sflint::FmpzRef(block_prime),
+                                              length, block));
+        while (length > 0 &&
+               sflint::fmpz_divisible(sflint::FmpzConstRef(leftover),
+                                      sflint::FmpzConstRef(block_prime))) {
+            sflint::fmpz_divexact(sflint::FmpzRef(leftover),
+                                  sflint::FmpzConstRef(leftover),
+                                  sflint::FmpzConstRef(block_prime));
+        }
+    }
+    if (!sflint::fmpz_is_one(sflint::FmpzConstRef(leftover))) {
+        return;
+    }
+
+    Outcome outcome = Outcome::fallback;
+    assert(silex::detail::TestHookAccess::smooth_norm_partial_row(
+            outcome, row, prime, element, base, bound));
+    assert(outcome != Outcome::fallback);
+
+    // The full-factorization partial of the relation search.
+    silex::Ideal principal(maximal_order);
+    assert(principal.set_principal(order_element));
+    silex::IdealFactorization factorization(maximal_order);
+    assert(factorization.factor(principal));
+    sflint::fmpz_mat_zero(sflint::FmpzMatRef(full_row));
+    slong outside = 0;
+    slong outside_exponent = 0;
+    for (slong i = 0; i < factorization.length(); ++i) {
+        slong exponent = 0;
+        assert(factorization.prime(factor_prime, i));
+        assert(factorization.exponent(exponent, i));
+        const slong index = base.index(factor_prime);
+        if (index >= 0) {
+            sflint::fmpz_set_si(sflint::fmpz_mat_entry(full_row, 0, index),
+                                exponent);
+            continue;
+        }
+        ++outside;
+        outside_exponent = exponent;
+        assert(full_prime.set(factor_prime));
+    }
+    if (outside == 1 && outside_exponent == 1) {
+        assert(outcome == Outcome::found);
+        assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(row),
+                                      sflint::FmpzMatConstRef(full_row)));
+        assert(prime.equal(full_prime));
+        ++counts.found;
+        return;
+    }
+    assert(outcome == Outcome::discard);
+    if (outside > 1) {
+        ++counts.two_primes;
+    } else if (outside == 1) {
+        ++counts.exponent_not_one;
+    }
+}
+
 // A norm smooth over the factor base's rational primes skips the full
 // ideal factorization of the partial relation search: the one rational
 // prime whose base-prime valuations leave a norm deficit is decomposed
@@ -3234,7 +3329,6 @@ int test_direct_partial_row_deduced_last_valuation() {
 // outside the base divides the element, with exponent 1, and a discard for
 // two such primes or an exponent other than 1.
 int test_smooth_norm_partial_matches_full_factorization() {
-    using Outcome = silex::detail::TestHookAccess::SmoothNormOutcome;
     silex::NumberField field = cubic_field(-6, -10);
     silex::Order equation_order;
     silex::Order maximal_order(field);
@@ -3249,88 +3343,11 @@ int test_smooth_norm_partial_matches_full_factorization() {
     assert(base.build_prime_ideal_norm_bounded(sflint::FmpzConstRef(bound)));
 
     sflint::FmpzMat coordinates(1, degree);
-    silex::OrderElement order_element(maximal_order);
-    silex::Element element(field);
-    sflint::Fmpq norm;
-    sflint::Fmpz leftover;
-    sflint::Fmpz block_prime;
-    sflint::FmpzMat row(0, 0);
-    sflint::FmpzMat full_row(1, base.length());
-    silex::PrimeIdeal prime(maximal_order);
-    silex::PrimeIdeal factor_prime(maximal_order);
-    silex::PrimeIdeal full_prime(maximal_order);
-    slong found = 0;
-    slong two_primes = 0;
-    slong exponent_not_one = 0;
+    SmoothNormPartialCounts counts;
     auto check_element = [&]() noexcept {
-        assert(order_element.set_coordinates(
-                sflint::FmpzMatConstRef(coordinates)));
-        assert(order_element.get_element(element));
-        assert(element.norm(sflint::FmpqRef(norm)));
-        sflint::fmpz_abs(sflint::FmpzRef(leftover),
-                         sflint::fmpq_num_ref(sflint::FmpqConstRef(norm)));
-        if (sflint::fmpz_cmp_ui(sflint::FmpzConstRef(leftover), 1) <= 0) {
-            return;
-        }
-        for (slong block = 0; block < base.rational_prime_block_count();
-             ++block) {
-            slong length = 0;
-            assert(base.rational_prime_block_data(
-                    sflint::FmpzRef(block_prime), length, block));
-            while (length > 0 &&
-                   sflint::fmpz_divisible(sflint::FmpzConstRef(leftover),
-                                          sflint::FmpzConstRef(block_prime))) {
-                sflint::fmpz_divexact(sflint::FmpzRef(leftover),
-                                      sflint::FmpzConstRef(leftover),
-                                      sflint::FmpzConstRef(block_prime));
-            }
-        }
-        if (!sflint::fmpz_is_one(sflint::FmpzConstRef(leftover))) {
-            return;
-        }
-
-        Outcome outcome = Outcome::fallback;
-        assert(silex::detail::TestHookAccess::smooth_norm_partial_row(
-                outcome, row, prime, element, base,
-                sflint::FmpzConstRef(bound)));
-        assert(outcome != Outcome::fallback);
-
-        // The full-factorization partial of the relation search.
-        silex::Ideal principal(maximal_order);
-        assert(principal.set_principal(order_element));
-        silex::IdealFactorization factorization(maximal_order);
-        assert(factorization.factor(principal));
-        sflint::fmpz_mat_zero(sflint::FmpzMatRef(full_row));
-        slong outside = 0;
-        slong outside_exponent = 0;
-        for (slong i = 0; i < factorization.length(); ++i) {
-            slong exponent = 0;
-            assert(factorization.prime(factor_prime, i));
-            assert(factorization.exponent(exponent, i));
-            const slong index = base.index(factor_prime);
-            if (index >= 0) {
-                sflint::fmpz_set_si(
-                        sflint::fmpz_mat_entry(full_row, 0, index), exponent);
-                continue;
-            }
-            ++outside;
-            outside_exponent = exponent;
-            assert(full_prime.set(factor_prime));
-        }
-        if (outside == 1 && outside_exponent == 1) {
-            assert(outcome == Outcome::found);
-            assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(row),
-                                          sflint::FmpzMatConstRef(full_row)));
-            assert(prime.equal(full_prime));
-            ++found;
-            return;
-        }
-        assert(outcome == Outcome::discard);
-        if (outside > 1) {
-            ++two_primes;
-        } else if (outside == 1) {
-            ++exponent_not_one;
-        }
+        check_smooth_norm_partial(counts, field, maximal_order, base,
+                                  sflint::FmpzConstRef(bound),
+                                  sflint::FmpzMatConstRef(coordinates));
     };
 
     for (slong a = -6; a <= 6; ++a) {
@@ -3359,9 +3376,45 @@ int test_smooth_norm_partial_matches_full_factorization() {
         sflint::fmpz_set_si(sflint::fmpz_mat_entry(coordinates, 0, 0), m);
         check_element();
     }
-    assert(found > 0);
-    assert(two_primes > 0);
-    assert(exponent_not_one > 0);
+    assert(counts.found > 0);
+    assert(counts.two_primes > 0);
+    assert(counts.exponent_not_one > 0);
+    return 0;
+}
+
+// Two primes outside the base over the same rational prime p.  x^5 - x - 1
+// has squarefree discriminant 19 * 151, so its equation order is maximal,
+// and 67 and 71 each split as residue degrees (1, 2, 2).  With bound 100
+// the block of p holds only the degree-one prime, so alpha = p leaves the
+// deficit v_p(N(p)) - 1 = 4 and the first prime outside the base that
+// divides p has exponent 1 but residue degree 2: the partial is discarded,
+// as the full factorization discards two primes outside the base.
+int test_smooth_norm_partial_two_primes_over_one_prime() {
+    silex::NumberField field = quintic_field(0, 0, -1, -1);
+    silex::Order equation_order;
+    silex::Order maximal_order(field);
+    equation_order = silex::test::equation_order(field);
+    assert(maximal_order.maximal_order(equation_order));
+    assert(maximal_order.is_maximal());
+
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, 100));
+    silex::FactorBase base(maximal_order);
+    assert(base.build_prime_ideal_norm_bounded(sflint::FmpzConstRef(bound)));
+
+    sflint::FmpzMat coordinates(1, maximal_order.degree());
+    SmoothNormPartialCounts counts;
+    const slong primes[2] = {67, 71};
+    for (slong p : primes) {
+        sflint::fmpz_mat_zero(sflint::FmpzMatRef(coordinates));
+        sflint::fmpz_set_si(sflint::fmpz_mat_entry(coordinates, 0, 0), p);
+        check_smooth_norm_partial(counts, field, maximal_order, base,
+                                  sflint::FmpzConstRef(bound),
+                                  sflint::FmpzMatConstRef(coordinates));
+    }
+    assert(counts.found == 0);
+    assert(counts.two_primes == 2);
+    assert(counts.exponent_not_one == 0);
     return 0;
 }
 
@@ -4288,6 +4341,59 @@ int test_pivot_search_draws_one_ideal_per_pass_degree_32() {
     assert(counter.pivot_searches > counter.draws);
     assert(counter.class_order == 17);
     assert(counter.invariants == std::vector<long>{17});
+    return 0;
+}
+
+void smooth_norm_found_callback(void* user,
+                                silex::DiagnosticsModule,
+                                silex::ProfileEvent event,
+                                const char*,
+                                const char* label) noexcept {
+    if (event == silex::ProfileEvent::event && label != nullptr &&
+        std::strcmp(label,
+                    "class_group.partial_relation_smooth_norm_found") == 0) {
+        ++*static_cast<long*>(user);
+    }
+}
+
+// The grh relation search keeps partial relations whose norm is smooth
+// over the base's rational primes through the smooth-norm route of
+// try_partial_relation_ (one decomposition of the deficient rational
+// prime), not the full ideal factorization.
+long grh_smooth_norm_partial_count(const silex::NumberField& field) {
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+
+    sflint::Fmpz bound;
+    assert(silex::factor_base_class_group_bound(sflint::FmpzRef(bound),
+                                               maximal));
+    silex::ClassGroupComputeOptions options;
+    options.max_candidates = 5000;
+    options.max_relations = 1000;
+    options.requested_certification = silex::CertificationMode::grh;
+
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    long found = 0;
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::class_group),
+            smooth_norm_found_callback, &found);
+    options.diagnostics = &diagnostics;
+
+    silex::ClassGroupContext computed;
+    silex::OrderUnitGroup units;
+    silex::detail::ClassUnitTransactionReport audit;
+    assert(silex::detail::compute_class_unit_transaction(
+            units, computed, maximal, sflint::FmpzConstRef(bound), options,
+            128, audit));
+    return found;
+}
+
+int test_grh_partial_relations_take_smooth_norm_route() {
+    // x^3 + 3x + 17: the grh run keeps smooth-norm partials.
+    assert(grh_smooth_norm_partial_count(cubic_field(3, 17)) > 0);
     return 0;
 }
 #endif
@@ -9632,6 +9738,7 @@ int main() {
     test_direct_partial_row_exact_valuation_cubic();
     test_direct_partial_row_deduced_last_valuation();
     test_smooth_norm_partial_matches_full_factorization();
+    test_smooth_norm_partial_two_primes_over_one_prime();
     test_compute_candidate_post_finite_refinement_cubic();
     test_compute_candidate_relation_kernel_target_quadratic();
     test_compute_candidate_relation_kernel_target_shifted_quadratic();
@@ -9646,6 +9753,7 @@ int main() {
     test_relation_saturation_scan_skips_settled_rows();
     test_pivot_search_draws_ideal_per_pivot_cubic();
     test_pivot_search_draws_one_ideal_per_pass_degree_32();
+    test_grh_partial_relations_take_smooth_norm_route();
 #endif
     test_pivot_search_pass_random_ideal_degree_gate();
     test_relation_saturation_index_bound_with_units_degree_one();
