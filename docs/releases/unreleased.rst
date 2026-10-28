@@ -147,15 +147,14 @@ Changed
   ``pure_x8_minus_3``, ``quintic_disc401370255_proven``,
   ``quintic_x5_minus_x_minus_1_proven``, ``random_d10_h4_s27_proven``,
   ``real_quadratic_d100000001``, ``simplest_cubic_a0``, ``simplest_cubic_a12``.
-  Whole-process callgrind Ir (busy machine) drops by 12.48% on
-  ``simplest_cubic_a12``, 16.59% on ``simplest_cubic_a0`` and 16.87% on
-  ``pure_x4_minus_7`` (savings of 2 to 28% on 21 rows that reach the refined
-  step).  Where the refined value is unavailable the step is wasted work, so
-  these ``grh`` rows are slower, accepted by decision for now:
-  ``imaginary_quadratic_d100000000000319`` (+10.23%),
-  ``cyclotomic_real_q10_c11_deg10`` (+3.75%), ``cyclotomic_37_phi36``
-  (+1.13%), ``real_quadratic_d10000000005`` (+20.04%) and
-  ``real_quadratic_d1000000000009`` (+28.22%).  A later change is planned to
+  Whole-process callgrind Ir (busy machine) drops by 13.03% on
+  ``simplest_cubic_a12``, 17.16% on ``simplest_cubic_a0`` and 22.70% on
+  ``pure_x4_minus_7``.  Where the refined value is unavailable the step is
+  wasted work, so these ``grh`` rows are slower, accepted by decision for
+  now: ``imaginary_quadratic_d100000000000319`` (+10.23%),
+  ``cyclotomic_real_q10_c11_deg10`` (+3.77%), ``cyclotomic_37_phi36``
+  (+0.91%), ``real_quadratic_d10000000005`` (+21.99%) and
+  ``real_quadratic_d1000000000009`` (+29.29%).  A later change is planned to
   recover them.
 
 - ``Ideal::multiply`` on a maximal order, when the two-generator search for

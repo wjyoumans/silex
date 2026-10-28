@@ -379,13 +379,17 @@ public:
     // under GRH for zeta_K and zeta_Q (Belabas-Friedman 2015, Theorem 1 or
     // Theorem 7), so it is a GRH-conditional record, not an unconditional
     // proof.  A record stored by an accepted `grh` class/unit transaction
-    // comes from the coarse index-one evaluation (Theorem 7 error bound, cutoff
+    // comes from the evaluation whose value gave the accepting index bound
+    // of one: the coarse index-one evaluation (Theorem 7 error bound, cutoff
     // chosen so that the absolute error of log(hR) is below 1/4, enough to
-    // decide h_cand R_cand/hR < 2) only when that coarse value itself shows
-    // index one; any other outcome (no cutoff up to 20007, or a coarse value
-    // that does not show index one) is recomputed and recorded from the default
-    // zeta route.  Such a coarse value is then discarded, so a field can pay
-    // up to part of one extra analytic evaluation.  A field whose default
+    // decide h_cand R_cand/hR < 2) when that coarse value shows index one;
+    // otherwise the refined evaluation of the grh index bound (Theorem 7,
+    // absolute error below 1/q, q = max(8, 2B) for the coarse bound B) when
+    // its enclosure of the index holds the single integer one; otherwise
+    // (no cutoff up to 20007, or neither value decides) the default zeta
+    // route, which recomputes the value.  Such coarse and refined values
+    // are then discarded, so a field can pay up to part of one or two extra
+    // analytic evaluations.  A field whose default
     // route fails can be accepted when the coarse value shows index one.  Its error bound need not meet the target for the requested
     // precision (unlike `try_certify_class_unit_with_zeta_bf`).
     ProofState zeta_bf_proof_status() const noexcept;

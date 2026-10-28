@@ -2568,8 +2568,8 @@ measured on the ``grh`` corpus, not taken from a source.  If the scan finds no c
 zeta route computes the value (so such fields pay up to part of one or two
 extra analytic evaluations).  A field whose default route fails can
 therefore be accepted under GRH when the coarse value shows index one.
-A ``grh`` request takes the coarse value, and the default route's
-Belabas--Friedman ``hR`` when the coarse value does not show index one, in
+A ``grh`` request takes the coarse value, then the refined value, and the
+default route's Belabas--Friedman ``hR`` when neither decides, in
 every degree above one, including a quadratic field written as ``x^2 - d``,
 which also has the unconditional ``L(1, chi_D)`` route; ``proven`` requests
 and the public zeta gates keep that route first.  Hecke v0.38.6
@@ -2591,9 +2591,10 @@ relation-saturation proof: ``relation_saturation_status()`` is not set to
 The pair is published with both labels ``grh``, and the analytic check that
 accepted it is recorded on the published class group with its own
 conditionality.  ``analytic_class_regulator_certification()`` is ``grh``,
-since the accepting ``hR`` is a Belabas--Friedman value (the default zeta
-route's Belabas--Friedman evaluation), and the BF audit data of that
-evaluation is recorded as well: its error bound, cutoff, maximum cutoff, and
+since the accepting ``hR`` is a Belabas--Friedman value (the coarse value
+when it shows index one, the refined value when its enclosure holds the
+single integer one, or else the default zeta route's Belabas--Friedman
+evaluation), and the BF audit data of that evaluation is recorded as well: its error bound, cutoff, maximum cutoff, and
 precisions (``zeta_bf_proof_record()``).  The record is
 informational.  The ``grh`` transaction never changes or promotes the
 class-group or unit labels, and the record does not change the public zeta
