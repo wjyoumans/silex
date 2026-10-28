@@ -756,9 +756,9 @@ void count_debug_failure(void* user,
 #endif
 
 // With expensive debug checks on, a candidate decided dependent by the
-// relation step is checked against compact_independent, which must decide
-// it and call it dependent (add_independent_unit's debug check); no check
-// may fail.  Without debug checks this only repeats the decision.
+// relation step is checked against compact_independent, which must not call
+// it independent (add_independent_unit's debug check; here it decides it
+// dependent); no check may fail.  Without debug checks this only repeats the decision.
 int test_relation_decision_debug_check() {
     silex::NumberField field = sextic_with_complex_places();
     silex::Element theta(field);
@@ -777,6 +777,62 @@ int test_relation_decision_debug_check() {
     const silex::detail::IncrementalUnitContext context =
             square_then_cube(field, embeddings, u, 3, 32, &diagnostics);
     assert(context.relation_decisions == 1);
+    assert(failures == 0);
+    return 0;
+}
+
+// The relation decision of test_relation_decision_debug_check with the
+// precision cap forced to 32 bits, the decision precision: compact_independent
+// cannot double past the cap, so it does not decide (B is about 2^-46 here).  An undecided compact_independent
+// does not contradict the relation decision, so the debug check must not
+// fail; it only fails when compact_independent decides the candidate
+// independent.  Without debug checks this only repeats the decision.
+int test_relation_decision_debug_check_tolerates_undecided() {
+    silex::NumberField field = sextic_with_complex_places();
+    silex::Element theta(field);
+    silex::Element u(field);
+    assert(theta.gen());
+    assert(u.add_si(theta, -1));
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    slong failures = 0;
+#if defined(SILEX_ENABLE_DEBUG_CHECKS) && SILEX_ENABLE_DEBUG_CHECKS
+    silex::diagnostics_set_debug_checks(
+            diagnostics, silex::DebugLevel::expensive,
+            silex::diagnostics_all_modules, count_debug_failure, &failures);
+#endif
+    silex::FactoredElement square(field);
+    silex::FactoredElement cube(field);
+    assert(square.push(u, 2));
+    assert(cube.push(u, 3));
+    std::vector<silex::FactoredElement> trial;
+    trial.emplace_back(field);
+    assert(trial.back().set(square));
+    trial.emplace_back(field);
+    assert(trial.back().set(cube));
+
+    constexpr slong precision = 32;
+    PrecisionCapOverride cap(precision);
+    silex::EmbeddingContext embeddings(field);
+    bool independent = false;
+    assert(!silex::detail::compact_independent(
+            independent, embeddings,
+            silex::FactoredElementSpan(trial.data(), trial.size()),
+            precision));
+
+    silex::detail::IncrementalUnitContext context;
+    assert(context.define(field, 3));
+    bool changed = false;
+    assert(context.add_independent_unit(changed, square, embeddings,
+                                        precision, &diagnostics));
+    assert(changed);
+    changed = true;
+    assert(context.add_independent_unit(changed, cube, embeddings, precision,
+                                        &diagnostics));
+    assert(!changed);
+    assert(context.units.size() == 1);
+    assert(context.relation_decisions == 1);
+    assert(context.fallback_decisions == 0);
     assert(failures == 0);
     return 0;
 }
@@ -830,6 +886,7 @@ int main() {
     assert(test_dependent_candidate_decided_by_relation() == 0);
     assert(test_forced_relation_failure_takes_lower_bound_path() == 0);
     assert(test_relation_decision_debug_check() == 0);
+    assert(test_relation_decision_debug_check_tolerates_undecided() == 0);
     assert(test_relation_unit_nontrivial_root_of_unity() == 0);
     assert(test_precisions_below_a_between_doubling_start_are_tried() == 0);
     return 0;

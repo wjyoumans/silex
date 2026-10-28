@@ -598,15 +598,16 @@ bool discard_bordered_gram_states(IncrementalUnitContext& context) noexcept {
 }
 
 #if defined(SILEX_ENABLE_DEBUG_CHECKS) && SILEX_ENABLE_DEBUG_CHECKS
-// True when compact_independent, the B-bound path, decides and calls the
-// last unit dependent.  Stricter than incremental_independence_agrees:
-// an undecided compact_independent (cap or failed embedding) also fails.
+// True unless compact_independent, the B-bound path, decides the last unit
+// independent.  As in incremental_independence_agrees, an undecided
+// compact_independent (precision cap or failed embedding) does not
+// contradict the relation decision, so it passes.
 bool incremental_relation_dependence_confirmed(
         EmbeddingContext& embeddings,
         FactoredElementSpan units,
         slong precision) noexcept {
     bool direct = true;
-    return compact_independent(direct, embeddings, units, precision) &&
+    return !compact_independent(direct, embeddings, units, precision) ||
            !direct;
 }
 
@@ -765,8 +766,8 @@ bool IncrementalUnitContext::add_independent_unit(
         SILEX_DEBUG_CHECK(
                 diagnostics, DiagnosticsModule::unit_group,
                 DebugLevel::expensive,
-                "relation-decided dependent candidate is dependent by "
-                "compact_independent",
+                "relation-decided dependent candidate is not independent "
+                "by compact_independent",
                 incremental_relation_dependence_confirmed(
                         embeddings,
                         FactoredElementSpan(units.data(), units.size()),
