@@ -7,6 +7,7 @@
 namespace silex {
 
 struct DiagnosticsContext;
+class EmbeddingContext;
 
 namespace detail {
 
@@ -59,6 +60,27 @@ bool isolate_roots_in_previous_order(acb_ptr roots,
                                      slong precision,
                                      const DiagnosticsContext* diagnostics,
                                      slong* attempts = nullptr) noexcept;
+
+// Noninstalled access to EmbeddingContext internals.
+class EmbeddingContextAccess {
+public:
+    // Gives `out`, a defined context with no roots yet, a copy of the roots
+    // stored in `source` for the same field (NumberField::has_same_data),
+    // so its first refine() at or below source.precision() needs no root
+    // isolation.  The copy keeps `source`'s place order and precision, and
+    // `out` is left as `source` would be after the same refine() calls: a
+    // request at or below that precision returns the copied balls, and a
+    // higher one refines them (refine_roots_from_initial, then full
+    // isolation in the same place order).  Nothing else is copied: `out`
+    // keeps its own logarithmic-embedding cache, and its evaluation tables
+    // are built from the copied roots on first use.
+    //
+    // Returns false and leaves `out` unchanged when `out` is undefined or
+    // already has roots, `source` has none, the fields differ, or the copy
+    // cannot be allocated.
+    static bool seed_roots(EmbeddingContext& out,
+                           const EmbeddingContext& source) noexcept;
+};
 
 }  // namespace detail
 }  // namespace silex

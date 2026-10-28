@@ -11,10 +11,12 @@
 #include "../class_group/relation_saturation_internal.hpp"
 #include "../factored_element/compact_reconstruction_internal.hpp"
 #include "../factored_element/factor_screen_hash_internal.hpp"
+#include "../embedding/embedding_internal.hpp"
 #include "../factored_element/wide_factored_internal.hpp"
 #include "../lat/certified_lll_internal.hpp"
 #include "../lat/flatter_backend_internal.hpp"
 #include "../lat/fplll_backend_internal.hpp"
+#include "../order/order_internal.hpp"
 #include "../unit/unit_internal.hpp"
 
 #include <flint/arb_mat.h>
@@ -4964,6 +4966,23 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
     EmbeddingContext embeddings(*order.parent());
     if (!candidate_units.is_defined() || !scratch_units.is_defined()) {
         return false;
+    }
+    // The relation search above usually built the order's Minkowski rows,
+    // which isolated the roots of the defining polynomial in the order's own
+    // embedding context.  Start from a copy of those certified roots instead
+    // of isolating them a second time.  The copy keeps that context's place
+    // order and precision, so the unit stage's balls can differ from those of
+    // a fresh isolation at its own first request (they are tighter when the
+    // order context isolated at a higher precision); requests above that
+    // precision refine the copy as usual.  The unit stage keeps its own context
+    // (and logarithmic-embedding cache) because the order context is also
+    // refined by later Minkowski-row builds.  When the order context has no
+    // roots, or the copy fails, this context isolates on first use as before.
+    if (const EmbeddingContext* order_embeddings =
+                detail::OrderAccess::minkowski_embedding_context(order);
+        order_embeddings != nullptr && order_embeddings->is_set()) {
+        static_cast<void>(detail::EmbeddingContextAccess::seed_roots(
+                embeddings, *order_embeddings));
     }
 
     AnalyticClassRegulatorCache analytic_cache;

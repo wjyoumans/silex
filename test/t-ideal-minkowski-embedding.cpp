@@ -1,11 +1,17 @@
 #include "class_group/ideal_minkowski_embedding_internal.hpp"
+#include "embedding/embedding_internal.hpp"
+#include "order/order_internal.hpp"
 #include "test_support.hpp"
 
+#include <silex/embedding.hpp>
+#include <silex/flint/acb.hpp>
 #include <silex/flint/arb_mat.hpp>
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/flint/fmpz_mat.hpp>
 #include <silex/number_field.hpp>
 #include <silex/order.hpp>
+
+#include <flint/acb.h>
 
 #include <cassert>
 
@@ -420,10 +426,55 @@ int test_product_contains_exact_values() {
 
 }  // namespace
 
+// The order's own embedding context, read through OrderAccess, gains roots
+// when the order's Minkowski rows are built, and a separate context for the
+// same field can be seeded from it with the same certified roots.
+int test_order_embedding_context_seeds_other_context() {
+    FieldSetup setup = pure_cubic(2);
+    const silex::EmbeddingContext* order_embeddings =
+            silex::detail::OrderAccess::minkowski_embedding_context(
+                    setup.maximal_order);
+    assert(order_embeddings != nullptr);
+    assert(!order_embeddings->is_set());
+
+    const slong precision = 264;
+    sflint::ArbMat rows(kDegree, kDegree);
+    assert(silex::detail::order_minkowski_embedding_rows(
+            sflint::ArbMatRef(rows), setup.maximal_order, precision));
+    assert(silex::detail::OrderAccess::minkowski_embedding_context(
+                   setup.maximal_order) == order_embeddings);
+    assert(order_embeddings->is_set());
+    assert(order_embeddings->precision() >= precision);
+
+    silex::EmbeddingContext seeded(*setup.maximal_order.parent());
+    assert(silex::detail::EmbeddingContextAccess::seed_roots(
+            seeded, *order_embeddings));
+    assert(seeded.precision() == order_embeddings->precision());
+    assert(seeded.refine(128));
+    for (slong i = 0; i < kDegree; ++i) {
+        sflint::Acb seeded_root;
+        sflint::Acb order_root;
+        assert(seeded.get_root(sflint::AcbRef(seeded_root), i));
+        assert(order_embeddings->get_root(sflint::AcbRef(order_root), i));
+        assert(::acb_equal(seeded_root.raw(), order_root.raw()) != 0);
+        // The root of x^3 - 2 lies in the ball.
+        sflint::Acb cube;
+        ::acb_pow_ui(cube.raw(), seeded_root.raw(), 3, precision);
+        ::acb_sub_ui(cube.raw(), cube.raw(), 2, precision);
+        assert(::acb_contains_zero(cube.raw()) != 0);
+    }
+
+    silex::Order undefined;
+    assert(silex::detail::OrderAccess::minkowski_embedding_context(
+                   undefined) == nullptr);
+    return 0;
+}
+
 int main() {
     assert(test_owner_lifetime_reuse_and_matrix_product() == 0);
     assert(test_precision_and_order_misses() == 0);
     assert(test_invalid_inputs_preserve_outputs_and_cache() == 0);
     assert(test_product_contains_exact_values() == 0);
+    assert(test_order_embedding_context_seeds_other_context() == 0);
     return 0;
 }

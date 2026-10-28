@@ -29,6 +29,8 @@ class EmbeddingContext;
 
 namespace detail {
 
+class EmbeddingContextAccess;
+
 // Version of the context's logarithmic-embedding cache, or false when the
 // context has no cache yet.  The version stays the same while every lookup
 // returns the same result, and versions are never reused across caches, so
@@ -110,6 +112,7 @@ private:
     // store of the same element can change what that lookup returns.
     void failed_log_embedding_miss_() noexcept;
 
+    friend class detail::EmbeddingContextAccess;
     friend bool detail::embedding_log_cache_version(
             std::uint64_t& out,
             const EmbeddingContext& embeddings) noexcept;

@@ -1614,6 +1614,14 @@ const flint::FmpzMat* OrderAccess::multiplication_table(Order& order) noexcept {
     return &data.mul_table_;
 }
 
+const EmbeddingContext* OrderAccess::minkowski_embedding_context(
+        const Order& order) noexcept {
+    if (!order.has_basis()) {
+        return nullptr;
+    }
+    return &order.data_->minkowski_embedding_context_;
+}
+
 bool OrderAccess::basis_is_identity(const Order& order) noexcept {
     if (!order.has_basis()) {
         return false;

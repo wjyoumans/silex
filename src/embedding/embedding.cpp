@@ -858,6 +858,30 @@ void EmbeddingContext::failed_log_embedding_miss_() noexcept {
 
 namespace detail {
 
+bool EmbeddingContextAccess::seed_roots(
+        EmbeddingContext& out,
+        const EmbeddingContext& source) noexcept {
+    if (!out.parent_.is_defined() || out.roots_are_set_ ||
+        !source.parent_.is_defined() || !source.roots_are_set_ ||
+        source.prec_ <= 0 || !out.parent_.has_same_data(source.parent_) ||
+        out.degree_ != source.degree_ ||
+        out.sig_.degree() != out.degree_ ||
+        source.roots_.length() != out.degree_) {
+        return false;
+    }
+
+    flint::AcbVec roots(out.degree_);
+    if (!roots.set_from(flint::AcbVecConstRef(source.roots_))) {
+        return false;
+    }
+    out.roots_.swap(roots);
+    out.evaluation_tree_.clear();
+    out.root_power_table_.clear();
+    out.prec_ = source.prec_;
+    out.roots_are_set_ = true;
+    return true;
+}
+
 bool embedding_log_cache_version(std::uint64_t& out,
                                  const EmbeddingContext& embeddings) noexcept {
     out = 0;

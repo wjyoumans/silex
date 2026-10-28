@@ -9,6 +9,10 @@
 
 #include <vector>
 
+namespace silex {
+class EmbeddingContext;
+}  // namespace silex
+
 namespace silex::detail {
 
 // One prime ideal of a decomposition cached by
@@ -129,6 +133,18 @@ public:
     // data).  Callers keep a handle on that data, and must not reassign it
     // through set, set_basis, define, swap or clear, while they read the view.
     static const flint::FmpzMat* multiplication_table(Order& order) noexcept;
+
+    // The embedding context detail::order_minkowski_embedding_rows keeps in
+    // the order's shared data, or null when `order` has no basis.  It has
+    // roots only once some Minkowski-row build has refined it (is_set());
+    // its precision is the highest one requested so far.  The context is
+    // written by those builds in the same unsynchronized way as the
+    // equation order index, so a reader must not hold the reference across
+    // a call that can build Minkowski rows of the same order data.  Used to
+    // seed a caller's own context with the same certified roots
+    // (EmbeddingContextAccess::seed_roots) instead of isolating them again.
+    static const EmbeddingContext* minkowski_embedding_context(
+            const Order& order) noexcept;
 
     // Whether the order's basis is exactly the identity matrix
     // (fmpq_mat_is_one: diagonal entries 1 with denominator 1, all other

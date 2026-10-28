@@ -799,6 +799,147 @@ int test_full_isolation_retries_ambiguous_match() {
 
 }  // namespace
 
+// Every root ball of `embeddings` encloses a root of x^5 - x - 1: the
+// polynomial evaluated on the ball contains zero, and the ball overlaps the
+// root a separate fresh isolation at `precision` puts at the same place.
+void assert_quintic_roots_certified(const silex::EmbeddingContext& embeddings,
+                                    const sflint::AcbVec& fresh,
+                                    slong precision) noexcept {
+    for (slong i = 0; i < 5; ++i) {
+        sflint::Acb root;
+        assert(embeddings.get_root(sflint::AcbRef(root), i));
+        sflint::Acb value;
+        ::acb_pow_ui(value.raw(), root.raw(), 5, precision);
+        ::acb_sub(value.raw(), value.raw(), root.raw(), precision);
+        ::acb_sub_ui(value.raw(), value.raw(), 1, precision);
+        assert(::acb_contains_zero(value.raw()) != 0);
+        assert(::acb_overlaps(root.raw(), fresh.data() + i) != 0);
+    }
+}
+
+// A context seeded with another context's roots (EmbeddingContextAccess::
+// seed_roots) starts at the source's roots, place order and precision.  A
+// request at or below that precision keeps the copied balls; a request
+// above it refines them to the requested accuracy.  Both return certified
+// enclosures in the place order of a fresh context.  Seeding is refused,
+// leaving the target unchanged, when the target already has roots, the
+// source has none, the fields differ, or the target is undefined.
+int test_seed_roots_from_another_context() {
+    const slong seeded_precision = 264;
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 5, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 1, -1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, -1);
+    silex::NumberField field = field_by_polynomial(polynomial);
+
+    silex::EmbeddingContext source(field);
+    assert(source.refine(seeded_precision));
+    sflint::AcbVec source_roots(5);
+    for (slong i = 0; i < 5; ++i) {
+        assert(source.get_root(sflint::AcbRef(source_roots.data() + i), i));
+    }
+
+    silex::EmbeddingContext seeded(field);
+    assert(silex::detail::EmbeddingContextAccess::seed_roots(seeded, source));
+    assert(seeded.is_set());
+    assert(seeded.precision() == seeded_precision);
+    assert(seeded.signature().r1() == 1);
+    assert(seeded.signature().r2() == 2);
+    for (slong i = 0; i < 5; ++i) {
+        sflint::Acb root;
+        assert(seeded.get_root(sflint::AcbRef(root), i));
+        assert(::acb_equal(root.raw(), source_roots.data() + i) != 0);
+    }
+
+    // Below the seeded precision: the copied roots serve the request.
+    const slong low_precision = 128;
+    silex::EmbeddingContext fresh_low(field);
+    assert(fresh_low.refine(low_precision));
+    sflint::AcbVec fresh_low_roots(5);
+    for (slong i = 0; i < 5; ++i) {
+        assert(fresh_low.get_root(
+                sflint::AcbRef(fresh_low_roots.data() + i), i));
+    }
+    assert(seeded.refine(low_precision));
+    assert(seeded.precision() == seeded_precision);
+    for (slong i = 0; i < 5; ++i) {
+        sflint::Acb root;
+        assert(seeded.get_root(sflint::AcbRef(root), i));
+        assert(::acb_equal(root.raw(), source_roots.data() + i) != 0);
+    }
+    assert_quintic_roots_certified(seeded, fresh_low_roots, low_precision);
+
+    silex::Element theta(field);
+    assert(theta.gen());
+    sflint::AcbVec seeded_values(5);
+    sflint::AcbVec fresh_values(5);
+    assert(seeded.evaluate_all(sflint::AcbVecRef(seeded_values), theta,
+                               low_precision));
+    assert(fresh_low.evaluate_all(sflint::AcbVecRef(fresh_values), theta,
+                                  low_precision));
+    for (slong i = 0; i < 5; ++i) {
+        assert(::acb_overlaps(seeded_values.data() + i,
+                              fresh_values.data() + i) != 0);
+    }
+    // The source is untouched by the seeded context's work.
+    assert(source.precision() == seeded_precision);
+
+    // Above the seeded precision: the copied roots are refined.
+    const slong high_precision = 1024;
+    assert(seeded.refine(high_precision));
+    assert(seeded.precision() == high_precision);
+    assert(min_root_accuracy(seeded, 5) >= high_precision);
+    silex::EmbeddingContext fresh_high(field);
+    assert(fresh_high.refine(high_precision));
+    sflint::AcbVec fresh_high_roots(5);
+    for (slong i = 0; i < 5; ++i) {
+        assert(fresh_high.get_root(
+                sflint::AcbRef(fresh_high_roots.data() + i), i));
+        sflint::Acb root;
+        assert(seeded.get_root(sflint::AcbRef(root), i));
+        assert(::acb_overlaps(root.raw(), source_roots.data() + i) != 0);
+    }
+    assert_quintic_roots_certified(seeded, fresh_high_roots, high_precision);
+    assert(seeded.evaluate_all(sflint::AcbVecRef(seeded_values), theta,
+                               high_precision));
+    assert(fresh_high.evaluate_all(sflint::AcbVecRef(fresh_values), theta,
+                                   high_precision));
+    for (slong i = 0; i < 5; ++i) {
+        assert(::acb_overlaps(seeded_values.data() + i,
+                              fresh_values.data() + i) != 0);
+    }
+
+    // A context with roots is not reseeded.
+    assert(!silex::detail::EmbeddingContextAccess::seed_roots(seeded,
+                                                              source));
+    assert(seeded.precision() == high_precision);
+
+    // A source without roots seeds nothing.
+    silex::EmbeddingContext unset_source(field);
+    silex::EmbeddingContext target(field);
+    assert(!silex::detail::EmbeddingContextAccess::seed_roots(target,
+                                                              unset_source));
+    assert(!target.is_set());
+
+    // Another field, even of the same degree, is refused.
+    sflint::FmpqPoly other_polynomial;
+    sflint::fmpq_poly_zero(other_polynomial);
+    sflint::fmpq_poly_set_coeff_si(other_polynomial, 5, 1);
+    sflint::fmpq_poly_set_coeff_si(other_polynomial, 0, -2);
+    silex::NumberField other_field = field_by_polynomial(other_polynomial);
+    silex::EmbeddingContext other(other_field);
+    assert(!silex::detail::EmbeddingContextAccess::seed_roots(other, source));
+    assert(!other.is_set());
+
+    // An undefined target is refused.
+    silex::EmbeddingContext undefined;
+    assert(!silex::detail::EmbeddingContextAccess::seed_roots(undefined,
+                                                              source));
+    assert(!undefined.is_defined());
+    return 0;
+}
+
 // evaluate_all through the root-power table agrees with FLINT's product-tree
 // multipoint evaluation at the same roots, encloses the exact trace and norm,
 // and is exactly real at real places.  A request below the precision of an
@@ -1038,6 +1179,7 @@ int main() {
     assert(test_refine_from_previous_roots_single_attempt() == 0);
     assert(test_refine_precision_cap() == 0);
     assert(test_full_isolation_retries_ambiguous_match() == 0);
+    assert(test_seed_roots_from_another_context() == 0);
     assert(test_evaluate_all_root_powers_match_product_tree() == 0);
     assert(test_log_embedding_cache_hash_collisions() == 0);
     return 0;
