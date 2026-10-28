@@ -215,8 +215,8 @@ bool logarithmic_embedding(flint::ArbVecRef out,
     // the input's exponent plus MAG_BITS (FLINT src/arb/log.c), so a place
     // whose absolute value is known to only a few bits is cheap.  An
     // accurately known place is still logged at the full evaluation
-    // precision, although the vector is no more accurate than its least
-    // accurate place: after cancellation a tiny conjugate of a large unit
+    // precision, although the vector's sup-norm radius is no smaller than
+    // that of its least accurate place: after cancellation a tiny conjugate of a large unit
     // can carry thousands of correct bits while its large conjugate carries
     // the full precision (hundreds of thousands of bits on large real
     // quadratic regulators).  Apply FLINT's cap with the least relative
@@ -225,7 +225,12 @@ bool logarithmic_embedding(flint::ArbVecRef out,
     // bits.  Since |log x_i| < 2^bits(exponent), the rounding error this
     // adds to place i is about 2^-(least_accuracy + MAG_BITS), below the
     // radius 2^-least_accuracy that the least accurate place already
-    // carries, so the largest radius of the vector does not grow.  For the
+    // carries, so the largest radius of the vector does not grow.  Accurately
+    // known places now carry radii up to about 2^-(least_accuracy + MAG_BITS).
+    // Callers that use only the first rank columns and drop an inaccurate last
+    // place (the unit_regulator minor, the relation_kernel solves) can thus
+    // lose accuracy down to about that level; soundness is unaffected, and
+    // the observable effect is a wider regulator_radius.  For the
     // least accurate place the cap equals FLINT's own cap, so that place,
     // and every place of the same relative accuracy, is computed exactly as
     // before.

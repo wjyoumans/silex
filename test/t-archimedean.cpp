@@ -292,6 +292,10 @@ int test_log_embedding_unbalanced_accuracy() {
     assert(::arb_rel_accuracy_bits(logs.data() + small) > 3000);
     assert(::mag_cmp(arb_radref(logs.data() + large),
                      arb_radref(logs.data() + small)) <= 0);
+    // Guard for the working-precision cap: without it the large place keeps
+    // about 8192 bits.
+    assert(::arb_rel_accuracy_bits(logs.data() + large) <=
+           ::arb_rel_accuracy_bits(logs.data() + small) + 64);
     assert(log_sum_overlaps_abs_norm(logs, unit, precision));
     return 0;
 }

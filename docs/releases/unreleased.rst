@@ -133,9 +133,9 @@ Added
 Changed
 -------
 - ``logarithmic_embedding`` logs every place at no more than the working
-  precision FLINT's ``arb_log`` would choose for the least accurate place
-  of the vector (that place's relative accuracy plus the bit length of the
-  input's exponent plus ``MAG_BITS``), instead of logging accurately known
+  precision equal to the least relative accuracy over the places plus
+  that place's own exponent bit length plus ``MAG_BITS`` (FLINT's
+  ``arb_log`` cap, applied with the least accuracy), instead of logging accurately known
   places at the full evaluation precision.  A large real quadratic unit
   evaluated at 524288 bits keeps only a few thousand correct bits in its
   tiny conjugate, so its large conjugate was logged at 524288 bits for no
