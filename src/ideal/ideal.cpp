@@ -16,6 +16,7 @@
 #include <silex/lat.hpp>
 
 #include "../order/order_internal.hpp"
+#include "../order_element/order_element_internal.hpp"
 #include "hnf_membership_internal.hpp"
 #include "ideal_access_internal.hpp"
 #include "prime_inverse_internal.hpp"
@@ -128,32 +129,40 @@ bool triangular_basis_contains_mod_det(const fmpz_mat_t basis,
     return true;
 }
 
-}  // namespace
+enum class WordMembership { member, nonmember, not_word };
 
-// B is invertible, so v lies in the row lattice of B iff the unique rational
-// solution x of x B = v is integral.  Because B is upper triangular, column j
-// of x B = v reads v_j = sum_{i <= j} x_i B_ij, so x_0, x_1, ... are
-// determined one at a time by dividing the reduced v_j by B_jj; v is in the
-// lattice iff every such division is exact.  This is the coordinate test of
-// reference `NumFieldOrd/NfOrd/Ideal/Ideal.jl:containment_by_matrices` (x in I
-// iff coordinates(x) * basis_mat_inv(I) is integral), evaluated by forward
-// substitution instead of a stored inverse.  When |det B| fits in a word the
-// same substitution runs on residues modulo |det B| (see
-// `triangular_basis_contains_mod_det`); the answer is the same.
-bool triangular_basis_contains(const fmpz_mat_t basis, fmpz* vector) noexcept {
+// The word-size half of `triangular_basis_contains`: decides membership when
+// every pivot is a single word and |det B| fits in a word, reading `vector`
+// only.  Bases up to kStackDegree use stack scratch instead of a heap vector.
+WordMembership triangular_basis_contains_word(const fmpz_mat_t basis,
+                                              const fmpz* vector) noexcept {
+    constexpr slong kStackDegree = 32;
     const slong n = fmpz_mat_ncols(basis);
-    {
-        // pivots in [0, n), residues in [n, 2 n).
-        std::vector<ulong> scratch(static_cast<std::size_t>(2 * n));
-        ulong determinant = 0;
-        if (triangular_pivots_word(determinant, scratch.data(), basis)) {
-            // A unimodular B spans all of Z^n.
-            return determinant == 1 ||
-                   triangular_basis_contains_mod_det(
-                           basis, vector, determinant, scratch.data(),
-                           scratch.data() + n);
-        }
+    ulong stack_scratch[2 * kStackDegree];
+    std::vector<ulong> heap_scratch;
+    ulong* scratch = stack_scratch;
+    if (n > kStackDegree) {
+        heap_scratch.resize(static_cast<std::size_t>(2 * n));
+        scratch = heap_scratch.data();
     }
+    // pivots in [0, n), residues in [n, 2 n).
+    ulong determinant = 0;
+    if (!triangular_pivots_word(determinant, scratch, basis)) {
+        return WordMembership::not_word;
+    }
+    // A unimodular B spans all of Z^n.
+    return determinant == 1 ||
+                   triangular_basis_contains_mod_det(basis, vector,
+                                                     determinant, scratch,
+                                                     scratch + n)
+           ? WordMembership::member
+           : WordMembership::nonmember;
+}
+
+// The exact forward substitution, using `vector` as the residual.
+bool triangular_basis_contains_exact(const fmpz_mat_t basis,
+                                     fmpz* vector) noexcept {
+    const slong n = fmpz_mat_ncols(basis);
     flint::Fmpz quotient;
     for (slong j = 0; j < n; ++j) {
         if (fmpz_is_zero(vector + j) != 0) {
@@ -170,6 +179,41 @@ bool triangular_basis_contains(const fmpz_mat_t basis, fmpz* vector) noexcept {
         }
     }
     return true;
+}
+
+}  // namespace
+
+// B is invertible, so v lies in the row lattice of B iff the unique rational
+// solution x of x B = v is integral.  Because B is upper triangular, column j
+// of x B = v reads v_j = sum_{i <= j} x_i B_ij, so x_0, x_1, ... are
+// determined one at a time by dividing the reduced v_j by B_jj; v is in the
+// lattice iff every such division is exact.  This is the coordinate test of
+// reference `NumFieldOrd/NfOrd/Ideal/Ideal.jl:containment_by_matrices` (x in I
+// iff coordinates(x) * basis_mat_inv(I) is integral), evaluated by forward
+// substitution instead of a stored inverse.  When |det B| fits in a word the
+// same substitution runs on residues modulo |det B| (see
+// `triangular_basis_contains_mod_det`); the answer is the same.
+bool triangular_basis_contains(const fmpz_mat_t basis, fmpz* vector) noexcept {
+    const WordMembership word =
+            triangular_basis_contains_word(basis, vector);
+    if (word != WordMembership::not_word) {
+        return word == WordMembership::member;
+    }
+    return triangular_basis_contains_exact(basis, vector);
+}
+
+bool triangular_basis_contains_row(const fmpz_mat_t basis,
+                                   const fmpz* vector) noexcept {
+    const WordMembership word =
+            triangular_basis_contains_word(basis, vector);
+    if (word != WordMembership::not_word) {
+        return word == WordMembership::member;
+    }
+    const slong n = fmpz_mat_ncols(basis);
+    flint::FmpzMat residual(1, n);
+    _fmpz_vec_set(fmpz_mat_row(residual.raw(), 0), vector, n);
+    return triangular_basis_contains_exact(basis,
+                                           fmpz_mat_row(residual.raw(), 0));
 }
 
 }  // namespace detail
@@ -792,8 +836,12 @@ bool Ideal::contains(const OrderElement& element) const noexcept {
         return false;
     }
 
-    flint::FmpzMat row(1, parent_.degree());
-    if (!element.get_coordinates(flint::FmpzMatRef(row))) {
+    // The element's stored coordinates are read in place; a copy is made
+    // only for the fallbacks that need a residual or a matrix argument.
+    const fmpz_mat_struct* coordinates =
+            detail::OrderElementAccess::coordinates(element);
+    if (coordinates == nullptr || fmpz_mat_nrows(coordinates) != 1 ||
+        fmpz_mat_ncols(coordinates) != parent_.degree()) {
         return false;
     }
     // Every construction route is expected to store a full-rank HNF, which
@@ -804,11 +852,11 @@ bool Ideal::contains(const OrderElement& element) const noexcept {
     // it is not reachable through the API today.  Tests reach it through the
     // noninstalled detail::IdealAccess hook.
     if (is_triangular_basis_of_degree(hnf_, parent_.degree())) {
-        return detail::triangular_basis_contains(hnf_.raw(),
-                                                 fmpz_mat_row(row.raw(), 0));
+        return detail::triangular_basis_contains_row(
+                hnf_.raw(), fmpz_mat_row(coordinates, 0));
     }
     return hnf_lattice_contains(flint::FmpzMatConstRef(hnf_),
-                                flint::FmpzMatConstRef(row));
+                                flint::FmpzMatConstRef(coordinates));
 }
 
 bool Ideal::contains(const Ideal& ideal) const noexcept {

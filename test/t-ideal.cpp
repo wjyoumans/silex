@@ -4121,6 +4121,7 @@ int test_contains_failure_returns() {
 // do not (the exact route) both occur, with single-word and multiword
 // vectors.  Lower triangular, singular and non-square matrices fail the shape
 // check, so Ideal::contains keeps the lattice test for them.
+// The read-only triangular_basis_contains_row must give the same answer.
 int test_triangular_basis_contains_matches_hnf_reference() {
     sflint::FmpzMat lower(2, 2);
     sflint::FmpzMat singular(2, 2);
@@ -4217,6 +4218,11 @@ int test_triangular_basis_contains_matches_hnf_reference() {
                     expected) {
                     return 1;
                 }
+                if (silex::detail::triangular_basis_contains_row(
+                            basis.raw(), fmpz_mat_row(row.raw(), 0)) !=
+                    expected) {
+                    return 1;
+                }
                 ++(expected ? members : nonmembers);
             }
         }
@@ -4255,6 +4261,11 @@ int test_triangular_basis_contains_matches_hnf_reference() {
             fmpz_mat_set(residual.raw(), row.raw());
             if (silex::detail::triangular_basis_contains(
                         basis.raw(), fmpz_mat_row(residual.raw(), 0)) !=
+                (member != 0)) {
+                return 1;
+            }
+            if (silex::detail::triangular_basis_contains_row(
+                        basis.raw(), fmpz_mat_row(row.raw(), 0)) !=
                 (member != 0)) {
                 return 1;
             }

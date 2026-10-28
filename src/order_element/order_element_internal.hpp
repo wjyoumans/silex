@@ -18,6 +18,13 @@ public:
             OrderElement& out,
             const Element& element,
             flint::FmpzMatConstRef coordinates) noexcept;
+
+    // The stored 1 x n coordinates of `element`, or nullptr when it is not
+    // defined.
+    static const fmpz_mat_struct* coordinates(
+            const OrderElement& element) noexcept {
+        return element.is_defined() ? element.coords_.raw() : nullptr;
+    }
 };
 
 }  // namespace silex::detail

@@ -14,4 +14,9 @@ bool is_full_rank_upper_triangular(const fmpz_mat_t basis) noexcept;
 // runs on residues modulo |det B| and leaves `vector` unchanged.
 bool triangular_basis_contains(const fmpz_mat_t basis, fmpz* vector) noexcept;
 
+// The same test on a read-only `vector`, copied into a residual only when
+// |det B| does not fit in a word.
+bool triangular_basis_contains_row(const fmpz_mat_t basis,
+                                   const fmpz* vector) noexcept;
+
 }  // namespace silex::detail
