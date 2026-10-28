@@ -132,6 +132,26 @@ Added
 
 Changed
 -------
+- ``logarithmic_embedding`` logs every place at no more than the working
+  precision FLINT's ``arb_log`` would choose for the least accurate place
+  of the vector (that place's relative accuracy plus the bit length of the
+  input's exponent plus ``MAG_BITS``), instead of logging accurately known
+  places at the full evaluation precision.  A large real quadratic unit
+  evaluated at 524288 bits keeps only a few thousand correct bits in its
+  tiny conjugate, so its large conjugate was logged at 524288 bits for no
+  gain.  Every entry is still a rigorous enclosure of the log, and the
+  added rounding stays below the radius the least accurate place already
+  carries.  ``proven`` outputs (167 corpus rows) are identical, including
+  ``regulator_radius``; ``grh`` outputs (171 rows) are identical except one
+  rigorous enclosure: ``cyclotomic_real_41_deg20``'s
+  ``unit_group.regulator_radius`` widens from 4.3932e-27 to 4.5486e-27
+  (regulator unchanged).  Timing keys are removed and the rows that time
+  out do so on both builds.  Whole-process callgrind Ir (busy machine)
+  drops against commit 034d35f8 by 21.24% on
+  ``real_quadratic_d1000000000009`` and 6.49% on
+  ``real_quadratic_d100000000000009`` (``proven``); no other measured row
+  (161 ``proven``, 171 ``grh``) changes by more than 0.04%.
+
 - ``Ideal::add`` stores the Hermite normal form of the sum of two ideals of
   one order without the closure test that multiplies every pair of basis
   elements: a sum of ideals is an ideal, so the test cannot fail there.
