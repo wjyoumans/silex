@@ -1636,6 +1636,11 @@ bool try_validate_refine_loop(ClassGroupContext& class_group,
             message += std::to_string(static_cast<long long>(pass));
             message += " index_bound=";
             message += log_fmpz_text(flint::FmpzConstRef(index_bound));
+            flint::Fmpz h_cand_log;
+            message += " h_cand=";
+            message += class_group.order(flint::FmpzRef(h_cand_log))
+                    ? log_fmpz_text(flint::FmpzConstRef(h_cand_log))
+                    : "?";
             SILEX_LOG(units.diagnostics(), DiagnosticsModule::unit_group,
                       LogLevel::detail, message.c_str());
         }
