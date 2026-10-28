@@ -738,6 +738,86 @@ int test_generator_associate_precheck_skips_associates() {
     assert(context.relation_count() == 2);
     assert(context.skipped_dependent_relation_count() == 1);
     assert(Access::generator_associate_skipped_candidates(context) == 1);
+
+    // Maximal order of Q(sqrt 5), basis (1, phi) with phi = (1 + t)/2, so the
+    // multiplication table is not that of a power basis in t.  phi is a
+    // non-torsion unit of norm -1 and N(a + b phi) = a^2 + a b - b^2.
+    // beta = 3 + phi has norm 11; phi^2 beta = 4 + 5 phi and phi^4 beta =
+    // 9 + 14 phi are associates; 4 - phi = conj(beta) has norm 11 but
+    // generates the other prime above 11.
+    silex::NumberField field5 = quadratic_field(5);
+    silex::Order equation5 = silex::test::equation_order(field5);
+    silex::Order order5(field5);
+    assert(order5.maximal_order(equation5));
+    assert(order5.is_maximal());
+    sflint::Fmpz bound5;
+    assert(set_fmpz_si(bound5, 20));
+    silex::ClassGroupContext context5(order5);
+    assert(context5.build_factor_base(sflint::FmpzConstRef(bound5)));
+    Access::use_route_generator_relation_policy(context5);
+    silex::OrderElement element5_order(order5);
+    silex::Element element5(field5);
+    sflint::Fmpq norm5;
+    sflint::FmpzMat coordinates5(1, 2);
+    sflint::FmpzMat captured5(1, context5.generator_count());
+    auto append5 = [&](slong a, slong b, bool capture) {
+        sflint::fmpz_set_si(sflint::fmpz_mat_entry(coordinates5, 0, 0), a);
+        sflint::fmpz_set_si(sflint::fmpz_mat_entry(coordinates5, 0, 1), b);
+        assert(element5_order.set_coordinates(
+                sflint::FmpzMatConstRef(coordinates5)));
+        assert(element5_order.get_element(element5));
+        assert(element5.norm(sflint::FmpqRef(norm5)));
+        if (capture) {
+            Access::arm_generator_relation_row_capture(context5, &captured5);
+        }
+        bool throttle = false;
+        assert(Access::try_append_integral_generator_relation(
+                context5, throttle, element5,
+                sflint::FmpzMatConstRef(coordinates5),
+                sflint::FmpqConstRef(norm5), nullptr,
+                silex::ClassGroupRelationSource::Search));
+        assert(!throttle);
+        if (capture) {
+            assert(Access::disarm_generator_relation_row_capture(context5));
+        }
+    };
+
+    // The first append stores beta; its captured row is the reference.
+    append5(3, 1, true);
+    assert(sflint::fmpq_equal_si(sflint::FmpqConstRef(norm5), 11));
+    assert(context5.relation_count() == 1);
+    sflint::FmpzMat stored5(1, context5.generator_count());
+    sflint::fmpz_mat_set(sflint::FmpzMatRef(stored5),
+                         sflint::FmpzMatConstRef(captured5));
+    for (slong k = 0; k < 2; ++k) {
+        const slong a = k == 0 ? 4 : 9;
+        const slong b = k == 0 ? 5 : 14;
+        append5(a, b, true);
+        assert(context5.relation_count() == 1);
+        assert(context5.skipped_dependent_relation_count() == k + 1);
+        assert(Access::generator_associate_skipped_candidates(context5) ==
+               k + 1);
+        assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(captured5),
+                                      sflint::FmpzMatConstRef(stored5)));
+    }
+    append5(4, -1, false);
+    assert(context5.relation_count() == 2);
+    assert(context5.skipped_dependent_relation_count() == 2);
+    assert(Access::generator_associate_skipped_candidates(context5) == 2);
+
+    // Units: after one unit row (phi) is stored, another unit (phi^2 = 1 +
+    // phi, norm 1) is skipped, as the duplicate zero row is on the full path.
+    append5(0, 1, false);
+    assert(context5.relation_count() == 3);
+    assert(context5.skipped_dependent_relation_count() == 2);
+    append5(1, 1, true);
+    assert(context5.relation_count() == 3);
+    assert(context5.skipped_dependent_relation_count() == 3);
+    assert(Access::generator_associate_skipped_candidates(context5) == 3);
+    for (slong j = 0; j < context5.generator_count(); ++j) {
+        assert(sflint::fmpz_is_zero(
+                sflint::fmpz_mat_entry(captured5, 0, j)));
+    }
     return 0;
 }
 
