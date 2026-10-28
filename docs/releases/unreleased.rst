@@ -152,6 +152,21 @@ Changed
   ``real_quadratic_d100000000000009`` (``proven``); no other measured row
   (161 ``proven``, 171 ``grh``) changes by more than 0.04%.
 
+- The ``grh`` residue screen of smooth generator candidates converts the
+  integral generator to an order element once and reuses it for the
+  residue-polynomial test and the valuation work, tests the residue
+  polynomial before allocating the valuation cache, and ``Ideal::contains``
+  reads the element coordinates in place instead of copying them.  Results,
+  failure cases and the stored ideals are unchanged: ``grh`` outputs (171
+  corpus rows, one times out on both builds) and ``proven`` outputs (166
+  rows, six time out on both), with timing keys removed, are identical.
+  Callgrind Ir against commit 034d35f8 (busy machine; no wall timing): the
+  timed transaction of ``cyclotomic_real_q10_c11_deg10`` ``grh`` drops from
+  823.81M to 792.73M (-3.77%; whole process -2.74%).  Over all 171 ``grh``
+  rows no row rises, the largest drop is 5.6% (``pure_x6_minus_5``); over
+  the 161 ``proven`` rows under the 20 s cap no row rises by more than
+  0.03% and the largest drop is 5.48% (``multiquadratic_m1_m3_p5``).
+
 - ``Ideal::add`` stores the Hermite normal form of the sum of two ideals of
   one order without the closure test that multiplies every pair of basis
   elements: a sum of ideals is an ideal, so the test cannot fail there.
