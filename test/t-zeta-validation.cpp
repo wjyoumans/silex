@@ -907,10 +907,13 @@ bool check_grh_transaction_records_index_one_audit(
                    0;
 }
 
-// When the coarse value does not show index one, the transaction discards
-// it and records the audit of the default route.  The cubic field
-// x^3 + x + 200 has a coarse cutoff of 882 but candidate index bound above
-// one at the first test.
+// The cubic field x^3 + x + 200 has a coarse cutoff of 882 but a candidate
+// index bound above one at the first test.  The first index bound is
+// decided by the refined value (or the default one), and the final test on
+// the accepted pair shows index one from the coarse value, so the
+// transaction records the coarse audit (cutoff 882).  Before the progressive
+// refined step the default value was cached by the first test and its audit
+// (the default cutoff) was recorded instead.
 bool check_grh_transaction_refines_to_default_audit(
         const FieldSetup& setup) noexcept {
     constexpr ulong coarse_cutoff = 882;
@@ -947,8 +950,8 @@ bool check_grh_transaction_refines_to_default_audit(
     }
     const std::optional<silex::ClassGroupZetaBfProofRecord> record =
             class_group.zeta_bf_proof_record();
-    return record.has_value() && record->cutoff == default_cutoff &&
-           record->cutoff != coarse_cutoff;
+    return record.has_value() && default_cutoff != coarse_cutoff &&
+           record->cutoff == coarse_cutoff;
 }
 
 // The grh default-route product (Belabas-Friedman residue at the default
