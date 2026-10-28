@@ -591,6 +591,24 @@ Changed
   identical outputs; ``cyclotomic_39_phi24`` outputs are identical and its
   Ir is unchanged.
 
+- When p fits in a word, the coordinate divisibility valuation of prime
+  ideals now carries the element modulo a word-size power q = p^k of p
+  instead of its exact coordinates.  Reduction modulo q is a ring map, so
+  k steps of the loop (multiply by the cached multiplier matrix, test every
+  coordinate for divisibility by p, divide by p) run in word arithmetic,
+  each step losing one p-adic digit of precision; the exact element is
+  advanced only after k passing steps, and not at all when the loop ends
+  first.  k is the largest exponent with q below 2^64 and, for odd p,
+  n (q - 1)^2 below 2^64 (one-word dot products of length n, the degree).
+  The steps tested and the valuations returned are unchanged.  On
+  ``multiquadratic_m23_m31_m47`` the timed region of ``grh``
+  (``compute_class_unit_transaction``, ``profile-release``) drops by 10.3%
+  Ir (callgrind, busy machine); ``nonadecic_x19_minus_x_minus_1_proven``
+  drops by 0.03% and ``hexadecic_x16_minus_x_minus_1_proven`` is unchanged.
+  ``grh`` outputs are identical to the previous code on 171 of the 172
+  class/unit corpus fields; ``cyclotomic_real_163_deg81`` did not finish
+  within 240 s on either build.
+
 - The exact LLL-reducedness test behind the certified first LLL phase (the
   integral Gram-Schmidt recurrence on the Gram matrix) first runs the same
   Gram-Schmidt recurrence in FLINT ball arithmetic at 64 bits, following the
