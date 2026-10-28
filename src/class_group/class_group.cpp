@@ -12077,7 +12077,9 @@ constexpr ulong kGeneratorAssociateSolvePrime = UWORD(4611686018427387847);
 // multiplication table (the coordinates of w_i * w_j).  M^-1 mod p comes
 // from Gauss-Jordan elimination of [M | I] over F_p.  The entry stays
 // unusable, so it never matches, on any failure, including M singular
-// modulo p.  `base_order` is the order of the factor base, in whose basis
+// modulo p, or when the order's multiplication table is unavailable at this
+// first preparation; the marking is permanent (never retried), which only
+// costs missed skips.  `base_order` is the order of the factor base, in whose basis
 // the coordinates are given; it must be `order`.
 void prepare_generator_associate_entry(detail::GeneratorAssociateEntry& entry,
                                        Order& order,
