@@ -4981,8 +4981,12 @@ bool OrderUnitGroup::compute_with_relation_class_group_(
     if (const EmbeddingContext* order_embeddings =
                 detail::OrderAccess::minkowski_embedding_context(order);
         order_embeddings != nullptr && order_embeddings->is_set()) {
-        static_cast<void>(detail::EmbeddingContextAccess::seed_roots(
-                embeddings, *order_embeddings));
+        if (detail::EmbeddingContextAccess::seed_roots(embeddings,
+                                                       *order_embeddings)) {
+            SILEX_PROFILE_EVENT(active_diagnostics,
+                                DiagnosticsModule::unit_group,
+                                "unit_group.embedding_context_seeded");
+        }
     }
 
     AnalyticClassRegulatorCache analytic_cache;

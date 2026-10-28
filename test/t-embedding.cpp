@@ -821,7 +821,8 @@ void assert_quintic_roots_certified(const silex::EmbeddingContext& embeddings,
 // seed_roots) starts at the source's roots, place order and precision.  A
 // request at or below that precision keeps the copied balls; a request
 // above it refines them to the requested accuracy.  Both return certified
-// enclosures in the place order of a fresh context.  Seeding is refused,
+// enclosures in the source's place order, which here agrees with a fresh
+// context's.  Seeding is refused,
 // leaving the target unchanged, when the target already has roots, the
 // source has none, the fields differ, or the target is undefined.
 int test_seed_roots_from_another_context() {

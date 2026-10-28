@@ -16197,6 +16197,32 @@ int test_grh_validation_skips_unit_rebuild_from_unchanged_class_context() {
     return 0;
 }
 
+// The unit stage of a grh relation compute seeds its embedding context with
+// the roots the order's Minkowski context already isolated for the relation
+// search instead of isolating them again; the one unit stage of this
+// compute records unit_group.embedding_context_seeded once.
+int test_grh_unit_stage_seeds_embedding_context_from_order() {
+    const std::vector<slong> cubic = {-1, -15, -12, 1};
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    TorsionEventCounter counter;
+    counter.label = "unit_group.embedding_context_seeded";
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::unit_group),
+            torsion_event_callback, &counter);
+    const TransactionRun run = run_transaction(
+            cubic, silex::CertificationMode::grh, 5000, 500, &diagnostics);
+    assert(run.ok && run.audit.final_result_published);
+    assert(run.free_rank == 2);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    assert(counter.count == 1);
+#else
+    assert(counter.count == 0);
+#endif
+    return 0;
+}
+
 struct DeferredSaturationEvents {
     slong deferred = 0;
     slong bounded_passes = 0;
@@ -17117,6 +17143,7 @@ int test_grh_saturation_square_tests_keep_degree_ten_lift_limit() {
 
 int main() {
     test_grh_validation_skips_unit_rebuild_from_unchanged_class_context();
+    test_grh_unit_stage_seeds_embedding_context_from_order();
     test_grh_validation_defers_bounded_saturation_to_extension();
     test_grh_validation_runs_deferred_saturation_before_acceptance();
     test_grh_runs_deferred_saturation_when_extension_appends_nothing();
