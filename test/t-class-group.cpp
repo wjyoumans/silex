@@ -1189,6 +1189,204 @@ int test_publish_matches_relation_lattice_after_mixed_appends() {
     return 0;
 }
 
+// The published presentation equals an independent
+// FiniteAbelianGroup::set_relation_matrix on the stored relations: same
+// relation rows, invariants, generators, reduction, and relation-kernel and
+// invariant-generator witnesses (the last two depend on the rows).
+bool published_presentation_matches_relations(
+        const silex::ClassGroupContext& context) noexcept {
+    const std::optional<sflint::FmpzMat> rows = context.relations();
+    silex::FiniteAbelianGroup independent;
+    silex::FiniteAbelianGroup published;
+    if (!rows.has_value() ||
+        !independent.set_relation_matrix(sflint::FmpzMatConstRef(*rows)) ||
+        !context.presentation(published) ||
+        !published_invariants_match_relations(context)) {
+        return false;
+    }
+    const slong m = independent.relation_count();
+    const slong n = independent.generator_count();
+    const slong k = independent.invariant_count();
+    const slong kernels = independent.relation_kernel_count();
+    if (published.relation_count() != m ||
+        published.generator_count() != n ||
+        published.invariant_count() != k ||
+        published.relation_kernel_count() != kernels) {
+        return false;
+    }
+    sflint::FmpzMat published_rows(m, n);
+    sflint::FmpzMat published_generators(k, n);
+    sflint::FmpzMat independent_generators(k, n);
+    sflint::FmpzMat published_kernel(kernels, m);
+    sflint::FmpzMat independent_kernel(kernels, m);
+    sflint::FmpzMat published_combinations(k, m);
+    sflint::FmpzMat independent_combinations(k, m);
+    sflint::FmpzMat published_row(1, n);
+    sflint::FmpzMat independent_row(1, n);
+    for (slong j = 0; j < n; ++j) {
+        sflint::fmpz_set_si(sflint::fmpz_mat_entry(published_row, 0, j),
+                            7 * j + 5);
+        sflint::fmpz_set_si(sflint::fmpz_mat_entry(independent_row, 0, j),
+                            7 * j + 5);
+    }
+    return published.relations(sflint::FmpzMatRef(published_rows)) &&
+           sflint::fmpz_mat_equal(published_rows, *rows) &&
+           published.invariant_generator_matrix(
+                   sflint::FmpzMatRef(published_generators)) &&
+           independent.invariant_generator_matrix(
+                   sflint::FmpzMatRef(independent_generators)) &&
+           sflint::fmpz_mat_equal(published_generators,
+                                  independent_generators) &&
+           published.relation_kernel_matrix(
+                   sflint::FmpzMatRef(published_kernel)) &&
+           independent.relation_kernel_matrix(
+                   sflint::FmpzMatRef(independent_kernel)) &&
+           sflint::fmpz_mat_equal(published_kernel, independent_kernel) &&
+           published.invariant_generator_relation_matrix(
+                   sflint::FmpzMatRef(published_combinations)) &&
+           independent.invariant_generator_relation_matrix(
+                   sflint::FmpzMatRef(independent_combinations)) &&
+           sflint::fmpz_mat_equal(published_combinations,
+                                  independent_combinations) &&
+           published.reduce(sflint::FmpzMatRef(published_row)) &&
+           independent.reduce(sflint::FmpzMatRef(independent_row)) &&
+           sflint::fmpz_mat_equal(published_row, independent_row);
+}
+
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+void count_smith_form_reused(void* user,
+                             silex::DiagnosticsModule,
+                             silex::ProfileEvent event,
+                             const char*,
+                             const char* label) noexcept {
+    if (event == silex::ProfileEvent::event && label != nullptr &&
+        std::strcmp(label,
+                    "class_group.publish_presentation.smith_form_reused") ==
+                0) {
+        ++*static_cast<long*>(user);
+    }
+}
+#endif
+
+// A relation append retires the published presentation, and the next
+// publish_presentation republishes into its storage; with an unchanged HNF
+// basis only the relation rows are replaced.  After each further relation
+// the published presentation, whose relation-kernel and invariant-generator
+// witnesses were filled before the append, equals one computed afresh from
+// the stored relations, and every relation-kernel witness is a unit.
+int test_republish_with_unchanged_basis_matches_fresh_presentation() {
+    using Access = silex::detail::ClassGroupRelationSearchAccess;
+    silex::NumberField field = degree_one_field();
+    silex::Order order;
+    order = silex::test::equation_order(field);
+    silex::ClassGroupContext context(order);
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, 5));
+    assert(context.build_factor_base(sflint::FmpzConstRef(bound)));
+    assert(context.generator_count() == 3);
+
+    long reused = 0;
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(
+                    silex::DiagnosticsModule::class_group),
+            count_smith_form_reused, &reused);
+#endif
+    context.set_diagnostics(&diagnostics);
+
+    const silex::FactorBase* base = context.factor_base();
+    assert(base != nullptr);
+    silex::Relation relation(*base);
+    silex::Element alpha(field);
+    bool skipped = true;
+    // Exponent rows over the primes (2, 3, 5).
+    const auto set_relation = [&](slong numerator, slong denominator) {
+        assert(alpha.set_si_over_si(numerator, denominator));
+        assert(relation.set_generator(alpha));
+    };
+    silex::FactoredElement witness(field);
+    silex::Element value(field);
+    silex::FractionalIdeal ideal(order);
+    sflint::FmpzMat row(1, 3);
+    // Fills the lazily computed witnesses of the published presentation and
+    // checks that every relation-kernel witness is a unit.
+    const auto use_witnesses = [&]() {
+        const slong kernels = context.relation_kernel_unit_count();
+        for (slong i = 0; i < kernels; ++i) {
+            assert(context.relation_kernel_unit(witness, i));
+            assert(witness.evaluate(value));
+            assert(ideal.set_principal(value));
+            assert(silex::ideal_factor_over_base(sflint::FmpzMatRef(row),
+                                                 ideal, *base));
+            for (slong j = 0; j < 3; ++j) {
+                assert(mat_entry_is_si(row, 0, j, 0));
+            }
+        }
+        assert(!context.relation_kernel_unit(witness, kernels));
+        for (slong i = 0; i < context.invariant_count(); ++i) {
+            assert(context.invariant_generator_power_witness(witness, i));
+        }
+    };
+
+    set_relation(12, 1);  // (2, 1, 0)
+    assert(context.append_relation(relation));
+    set_relation(18, 1);  // (1, 2, 0)
+    assert(context.append_relation(relation));
+    set_relation(25, 1);  // (0, 0, 2)
+    assert(context.append_relation(relation));
+    assert(context.relation_count() == 3);
+    // Z^3 / <(2,1,0), (1,2,0), (0,0,2)> = Z/6.
+    assert(context.publish_presentation());
+    assert(published_presentation_matches_relations(context));
+    use_witnesses();
+    assert(reused == 0);
+
+    // Two rows in the lattice, kept: the basis is unchanged, and each
+    // publish replaces only the relation rows of the retired presentation.
+    set_relation(216, 1);  // (3, 3, 0)
+    assert(Access::append_search_relation(skipped, context, relation));
+    assert(!skipped && !context.has_presentation());
+    assert(context.publish_presentation());
+    assert(context.relation_count() == 4);
+    assert(context.relation_kernel_unit_count() == 1);
+    assert(published_presentation_matches_relations(context));
+    use_witnesses();
+    set_relation(2, 3);  // (1, -1, 0)
+    assert(Access::append_search_relation(skipped, context, relation));
+    assert(!skipped && !context.has_presentation());
+    assert(context.publish_presentation());
+    assert(context.relation_count() == 5);
+    assert(context.relation_kernel_unit_count() == 2);
+    assert(published_presentation_matches_relations(context));
+    use_witnesses();
+    // Publishing again without an append keeps the presentation.
+    assert(context.publish_presentation());
+    assert(published_presentation_matches_relations(context));
+    use_witnesses();
+
+    // (0, 0, 1) refines the lattice: the Smith form is recomputed.
+    set_relation(5, 1);
+    assert(context.append_relation(relation));
+    assert(context.relation_count() == 6);
+    assert(context.publish_presentation());
+    assert(published_presentation_matches_relations(context));
+    use_witnesses();
+    // Z^3 / <(2,1,0), (1,2,0), (0,0,1)> = Z/3.
+    assert(context.order().has_value() &&
+           sflint::fmpz_equal_si(*context.order(), 3));
+
+    context.set_diagnostics(nullptr);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    assert(reused == 3);
+#else
+    assert(reused == 0);
+#endif
+    return 0;
+}
+
 int test_set_relation_matrix_preserves_on_failure() {
     silex::NumberField field = degree_one_field();
     silex::Order order;
@@ -9855,6 +10053,7 @@ int main() {
     test_generator_associate_precheck_off_above_degree_cap();
     test_small_lll_torsion_orbit_skip_keeps_counters();
     test_publish_matches_relation_lattice_after_mixed_appends();
+    test_republish_with_unchanged_basis_matches_fresh_presentation();
     test_append_keeps_index_refining_dependent_rows();
     test_factor_base_prime_search_masks();
     test_nonprincipal_indices_one_pass_matches_per_prime();

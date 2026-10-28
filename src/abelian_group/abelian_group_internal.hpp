@@ -16,9 +16,9 @@ struct FiniteAbelianGroupSmithCache {
     flint::FmpzMat snf{0, 0};
     flint::FmpzMat right_transform{0, 0};
     bool valid = false;
-    // Number of successful publishes that took S and V from the cache, and
-    // number that ran hnf_basis_smith_transform and recorded them; read by
-    // tests.
+    // Number of successful publishes that took S and V from the cache or
+    // kept those of a target group with an equal stored basis, and number
+    // that ran hnf_basis_smith_transform and recorded them; read by tests.
     slong reuse_count = 0;
     slong compute_count = 0;
 };
@@ -55,7 +55,7 @@ void hnf_basis_smith_transform(flint::FmpzMatRef snf,
 // The overload taking a FiniteAbelianGroupSmithCache publishes exactly the
 // group the plain overload publishes; it reuses the cached Smith form and
 // right transform when the stored basis equals the cached basis, and records
-// them otherwise.
+// them otherwise (see also the in-place case below).
 class FiniteAbelianGroupAccess {
 public:
     static bool set_relation_matrix_with_hnf_basis(
@@ -74,8 +74,33 @@ public:
                 group, relations, hnf_basis, &cache);
     }
 
+    // Publishes into `group` exactly the group the cache overload above
+    // publishes from the same relations and basis, but takes the storage of
+    // `relations` and `hnf_basis` instead of copying them; both are left in
+    // an unspecified valid state.  On failure `group` is unchanged.
+    //
+    // Both cache-taking entries publish in place when `group` already holds
+    // a defined group whose stored basis equals the new stored basis: only
+    // its relation rows are replaced.  Its Smith form, right transform,
+    // invariants and (if already filled) inverse right transform are the
+    // ones this publish would produce, since they depend on the stored basis
+    // alone, and its lazily filled left transform, which depends on the
+    // relation rows, is dropped.  Such a publish counts as a reuse and
+    // leaves the cached basis as it was.
+    static bool take_relation_matrix_with_hnf_basis(
+            FiniteAbelianGroup& group,
+            flint::FmpzMat& relations,
+            flint::FmpzMat& hnf_basis,
+            FiniteAbelianGroupSmithCache& cache) noexcept;
+
 private:
     friend class silex::FiniteAbelianGroup;
+
+    static bool publish_owned_relation_matrix(
+            FiniteAbelianGroup& group,
+            flint::FmpzMat& relations,
+            flint::FmpzMat& hnf_basis,
+            FiniteAbelianGroupSmithCache* cache) noexcept;
 
     static bool set_relation_matrix_with_hnf_basis_impl(
             FiniteAbelianGroup& group,

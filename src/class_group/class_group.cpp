@@ -12207,6 +12207,11 @@ bool ClassGroupContext::append_relation_with_outcome_(
         relation_rank_ = row_module_.rank();
         row_module_synced_ = true;
     }
+    // The presentation no longer matches the relations; its storage is kept
+    // for the next publish_presentation.
+    if (quotient_.is_defined()) {
+        private_storage_->retired_presentation.swap(quotient_);
+    }
     quotient_.clear();
     private_storage_->invalidate_reduced_relation_kernel();
     reset_certification_metadata_();
@@ -13533,7 +13538,6 @@ bool ClassGroupContext::publish_presentation() noexcept {
 
     flint::FmpzMat relation_rows(relation_count(), generator_count());
     flint::FmpzMat hnf_basis(generator_count(), generator_count());
-    FiniteAbelianGroup candidate;
     detail::FiniteAbelianGroupSmithCache& smith_cache =
             private_storage_->published_smith_form;
     const slong reused_before = smith_cache.reuse_count;
@@ -13547,12 +13551,19 @@ bool ClassGroupContext::publish_presentation() noexcept {
             "published relation rows lie in the row-module lattice",
             rows_reduce_to_zero_in_lattice(
                     row_module_, flint::FmpzMatConstRef(relation_rows)));
-    if (!detail::FiniteAbelianGroupAccess::set_relation_matrix_with_hnf_basis(
-                candidate,
-                flint::FmpzMatConstRef(relation_rows),
-                flint::FmpzMatConstRef(hnf_basis),
-                smith_cache)) {
+    // Publishes into the current presentation, or into the one the last
+    // relation append retired, taking the storage of both matrices; with an
+    // unchanged basis only the relation rows of the target are replaced
+    // (abelian_group_internal.hpp).  The target, and so quotient_, is
+    // unchanged on failure.
+    FiniteAbelianGroup& retired = private_storage_->retired_presentation;
+    FiniteAbelianGroup& target = quotient_.is_defined() ? quotient_ : retired;
+    if (!detail::FiniteAbelianGroupAccess::take_relation_matrix_with_hnf_basis(
+                target, relation_rows, hnf_basis, smith_cache)) {
         return false;
+    }
+    if (&target == &retired) {
+        quotient_.swap(retired);
     }
     if (smith_cache.reuse_count != reused_before) {
         SILEX_PROFILE_EVENT(
@@ -13560,7 +13571,6 @@ bool ClassGroupContext::publish_presentation() noexcept {
                 "class_group.publish_presentation.smith_form_reused");
     }
 
-    quotient_.swap(candidate);
     private_storage_->invalidate_reduced_relation_kernel();
     return true;
 }

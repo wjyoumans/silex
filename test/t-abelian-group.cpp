@@ -943,6 +943,165 @@ int test_smith_cache_reuses_unchanged_basis() {
     return 0;
 }
 
+// The fresh plain publish of `relations` with `basis`, compared with
+// `group` as cached_publish_matches_plain compares, plus the relation rows.
+bool group_matches_plain(const silex::FiniteAbelianGroup& group,
+                         const sflint::FmpzMat& relations,
+                         const sflint::FmpzMat& basis) {
+    using silex::detail::FiniteAbelianGroupAccess;
+    silex::FiniteAbelianGroup plain;
+    if (!FiniteAbelianGroupAccess::set_relation_matrix_with_hnf_basis(
+                plain, sflint::FmpzMatConstRef(relations),
+                sflint::FmpzMatConstRef(basis))) {
+        return false;
+    }
+    const slong k = plain.invariant_count();
+    const slong m = plain.relation_count();
+    const slong n = plain.generator_count();
+    if (group.invariant_count() != k || group.relation_count() != m ||
+        group.generator_count() != n ||
+        group.relation_kernel_count() != plain.relation_kernel_count()) {
+        return false;
+    }
+    for (slong i = 0; i < k; ++i) {
+        const auto group_invariant = group.invariant(i);
+        const auto plain_invariant = plain.invariant(i);
+        if (!group_invariant.has_value() || !plain_invariant.has_value() ||
+            !sflint::fmpz_equal(*group_invariant, *plain_invariant)) {
+            return false;
+        }
+    }
+    sflint::FmpzMat rows(m, n);
+    sflint::FmpzMat group_kernel(plain.relation_kernel_count(), m);
+    sflint::FmpzMat plain_kernel(plain.relation_kernel_count(), m);
+    return group.relations(sflint::FmpzMatRef(rows)) &&
+           sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(rows),
+                                  sflint::FmpzMatConstRef(relations)) &&
+           generator_matrix_and_reduce_match(group, plain) &&
+           group.relation_kernel_matrix(sflint::FmpzMatRef(group_kernel)) &&
+           plain.relation_kernel_matrix(sflint::FmpzMatRef(plain_kernel)) &&
+           sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(group_kernel),
+                                  sflint::FmpzMatConstRef(plain_kernel)) &&
+           relation_kernel_identity(group);
+}
+
+// take_relation_matrix_with_hnf_basis on copies of `relations` and `basis`.
+bool take_copies(silex::FiniteAbelianGroup& group,
+                 const sflint::FmpzMat& relations,
+                 const sflint::FmpzMat& basis,
+                 silex::detail::FiniteAbelianGroupSmithCache& cache) {
+    sflint::FmpzMat owned_relations(sflint::fmpz_mat_nrows(relations),
+                                    sflint::fmpz_mat_ncols(relations));
+    sflint::FmpzMat owned_basis(sflint::fmpz_mat_nrows(basis),
+                                sflint::fmpz_mat_ncols(basis));
+    sflint::fmpz_mat_set(sflint::FmpzMatRef(owned_relations),
+                         sflint::FmpzMatConstRef(relations));
+    sflint::fmpz_mat_set(sflint::FmpzMatRef(owned_basis),
+                         sflint::FmpzMatConstRef(basis));
+    return silex::detail::FiniteAbelianGroupAccess::
+            take_relation_matrix_with_hnf_basis(group, owned_relations,
+                                                owned_basis, cache);
+}
+
+// The storage-taking publish republishes into a defined group with an equal
+// stored basis in place, replacing only the relation rows: after each
+// further relation the group, whose witnesses (left transform) and inverse
+// right transform were filled before, equals a fresh plain publish.  A
+// changed basis recomputes, a failed publish leaves the group unchanged,
+// and an in-place publish counts as a reuse whatever the cache holds.
+int test_take_publish_reuses_group_with_unchanged_basis() {
+    silex::detail::FiniteAbelianGroupSmithCache cache;
+    silex::FiniteAbelianGroup group;
+
+    // Rows of a lattice with HNF basis [[2, 0, 2], [0, 3, 3], [0, 0, 6]].
+    const slong rows[6][3] = {{2, 3, 5}, {0, 3, 3}, {0, 0, 6},
+                              {2, 0, 2}, {4, 6, 4}, {2, 6, 8}};
+    const auto first_rows = [&](slong count) {
+        sflint::FmpzMat out(count, 3);
+        for (slong i = 0; i < count; ++i) {
+            for (slong j = 0; j < 3; ++j) {
+                set_entry_si(out, i, j, rows[i][j]);
+            }
+        }
+        return out;
+    };
+    sflint::FmpzMat basis(3, 3);
+    set_entry_si(basis, 0, 0, 2);
+    set_entry_si(basis, 0, 2, 2);
+    set_entry_si(basis, 1, 1, 3);
+    set_entry_si(basis, 1, 2, 3);
+    set_entry_si(basis, 2, 2, 6);
+
+    const sflint::FmpzMat four = first_rows(4);
+    assert(take_copies(group, four, basis, cache));
+    assert(cache.compute_count == 1 && cache.reuse_count == 0);
+    assert(group_matches_plain(group, four, basis));
+
+    // In place: more rows of the same lattice.
+    const sflint::FmpzMat five = first_rows(5);
+    assert(take_copies(group, five, basis, cache));
+    assert(cache.compute_count == 1 && cache.reuse_count == 1);
+    assert(group_matches_plain(group, five, basis));
+
+    // In place again, from a basis not in HNF (a unimodular row mix).
+    const sflint::FmpzMat six = first_rows(6);
+    sflint::FmpzMat mixed(3, 3);
+    set_entry_si(mixed, 0, 0, 2);
+    set_entry_si(mixed, 0, 1, 3);
+    set_entry_si(mixed, 0, 2, 5);
+    set_entry_si(mixed, 1, 1, 3);
+    set_entry_si(mixed, 1, 2, 3);
+    set_entry_si(mixed, 2, 2, -6);
+    assert(take_copies(group, six, mixed, cache));
+    assert(cache.compute_count == 1 && cache.reuse_count == 2);
+    assert(group_matches_plain(group, six, basis));
+
+    // A failed publish (fewer rows than columns) leaves the group as it was.
+    const sflint::FmpzMat two = first_rows(2);
+    assert(!take_copies(group, two, basis, cache));
+    assert(cache.compute_count == 1 && cache.reuse_count == 2);
+    assert(group_matches_plain(group, six, basis));
+
+    // A changed basis is recomputed and cached.
+    sflint::FmpzMat grown(7, 3);
+    for (slong i = 0; i < 6; ++i) {
+        for (slong j = 0; j < 3; ++j) {
+            set_entry_si(grown, i, j, rows[i][j]);
+        }
+    }
+    set_entry_si(grown, 6, 2, 3);
+    sflint::FmpzMat grown_basis(3, 3);
+    set_entry_si(grown_basis, 0, 0, 2);
+    set_entry_si(grown_basis, 0, 2, 2);
+    set_entry_si(grown_basis, 1, 1, 3);
+    set_entry_si(grown_basis, 2, 2, 3);
+    assert(take_copies(group, grown, grown_basis, cache));
+    assert(cache.compute_count == 2 && cache.reuse_count == 2);
+    assert(group_matches_plain(group, grown, grown_basis));
+
+    // In place against a cache that holds another basis: the group keeps
+    // its Smith form, and the cached basis is left as it was.
+    silex::detail::FiniteAbelianGroupSmithCache other;
+    silex::FiniteAbelianGroup unrelated;
+    assert(take_copies(unrelated, four, basis, other));
+    assert(other.compute_count == 1 && other.reuse_count == 0);
+    sflint::FmpzMat more_grown(8, 3);
+    for (slong i = 0; i < 7; ++i) {
+        for (slong j = 0; j < 3; ++j) {
+            sflint::fmpz_set(sflint::fmpz_mat_entry(more_grown, i, j),
+                             entry_const(grown, i, j));
+        }
+    }
+    set_entry_si(more_grown, 7, 0, 2);
+    set_entry_si(more_grown, 7, 2, 5);
+    assert(take_copies(group, more_grown, grown_basis, other));
+    assert(other.compute_count == 1 && other.reuse_count == 1);
+    assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(other.hnf_basis),
+                                  sflint::FmpzMatConstRef(basis)));
+    assert(group_matches_plain(group, more_grown, grown_basis));
+    return 0;
+}
+
 // The witness rows are the rows of diag(U_H, I) * T that the accessors read,
 // where T * relations = [H; 0] is fmpz_mat_hnf_transform and U_H * H * V = S
 // is hnf_basis_smith_transform of H (the route the publish and the witness
@@ -1244,6 +1403,7 @@ int main() {
     assert(test_internal_basis_setter_witnesses() == 0);
     assert(test_lazy_right_transform_inverse() == 0);
     assert(test_smith_cache_reuses_unchanged_basis() == 0);
+    assert(test_take_publish_reuses_group_with_unchanged_basis() == 0);
     assert(test_witness_rows_match_full_left_product() == 0);
     assert(test_unit_pivot_smith_matches_full() == 0);
     return 0;

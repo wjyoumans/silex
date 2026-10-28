@@ -798,25 +798,65 @@ bool FiniteAbelianGroupAccess::set_relation_matrix_with_hnf_basis_impl(
         return false;
     }
 
-    FiniteAbelianGroup candidate;
-    candidate.relations_ = flint::FmpzMat(rows, columns);
-    candidate.hnf_basis_ = flint::FmpzMat(columns, columns);
-    candidate.snf_ = flint::FmpzMat(columns, columns);
-    candidate.left_transform_ = flint::FmpzMat(0, 0);
-    candidate.right_transform_ = flint::FmpzMat(columns, columns);
-    candidate.right_transform_inv_ = flint::FmpzMat(columns, columns);
-    candidate.generator_count_ = columns;
+    flint::FmpzMat owned_relations(rows, columns);
+    flint::FmpzMat owned_basis(columns, columns);
+    flint::fmpz_mat_set(flint::FmpzMatRef(owned_relations), relations);
+    flint::fmpz_mat_set(flint::FmpzMatRef(owned_basis), hnf_basis);
+    return publish_owned_relation_matrix(group, owned_relations, owned_basis,
+                                         cache);
+}
 
-    flint::fmpz_mat_set(flint::FmpzMatRef(candidate.relations_), relations);
+bool FiniteAbelianGroupAccess::take_relation_matrix_with_hnf_basis(
+        FiniteAbelianGroup& group,
+        flint::FmpzMat& relations,
+        flint::FmpzMat& hnf_basis,
+        FiniteAbelianGroupSmithCache& cache) noexcept {
+    const slong rows = flint::fmpz_mat_nrows(relations);
+    const slong columns = flint::fmpz_mat_ncols(relations);
+    if (rows < columns ||
+        flint::fmpz_mat_nrows(hnf_basis) != columns ||
+        flint::fmpz_mat_ncols(hnf_basis) != columns) {
+        return false;
+    }
+    return publish_owned_relation_matrix(group, relations, hnf_basis, &cache);
+}
+
+// Shapes are checked by the callers: relations is m x n with m >= n and
+// hnf_basis is n x n.
+bool FiniteAbelianGroupAccess::publish_owned_relation_matrix(
+        FiniteAbelianGroup& group,
+        flint::FmpzMat& relations,
+        flint::FmpzMat& hnf_basis,
+        FiniteAbelianGroupSmithCache* cache) noexcept {
+    const slong columns = flint::fmpz_mat_ncols(relations);
 
     // Store the basis in Hermite normal form: the witness path compares it
     // with the HNF of the full relation matrix and reruns the Smith form on
     // that same basis, so both runs must see identical input.
-    if (::fmpz_mat_is_in_hnf(hnf_basis.raw()) != 0) {
-        flint::fmpz_mat_set(flint::FmpzMatRef(candidate.hnf_basis_),
-                            hnf_basis);
-    } else {
-        ::fmpz_mat_hnf(candidate.hnf_basis_.raw(), hnf_basis.raw());
+    if (::fmpz_mat_is_in_hnf(hnf_basis.raw()) == 0) {
+        flint::FmpzMat normalized(columns, columns);
+        ::fmpz_mat_hnf(normalized.raw(), hnf_basis.raw());
+        hnf_basis.swap(normalized);
+    }
+
+    // Every defined group got its S and V from hnf_basis_smith_transform
+    // of its stored basis, directly, through a cache like this one, or by
+    // copy (set), and its invariants from S; the lazily filled inverse of V
+    // depends on V alone.  So a defined group with an equal stored basis
+    // already holds the S, V, invariants and inverse this call would
+    // publish, all of which passed the checks below when it was published;
+    // only the relation rows, and the left transform derived from them,
+    // differ.  This is the determinism the cache below and the witness path
+    // already rely on.  Used only by the cache-taking entries.
+    if (cache != nullptr && group.is_defined() &&
+        group.generator_count_ == columns &&
+        flint::fmpz_mat_equal(flint::FmpzMatConstRef(group.hnf_basis_),
+                              flint::FmpzMatConstRef(hnf_basis))) {
+        group.relations_.swap(relations);
+        group.left_transform_ = flint::FmpzMat(0, 0);
+        group.has_left_transform_ = false;
+        ++cache->reuse_count;
+        return true;
     }
 
     // S and V depend only on the stored basis, which is the whole input of
@@ -829,7 +869,17 @@ bool FiniteAbelianGroupAccess::set_relation_matrix_with_hnf_basis_impl(
             flint::fmpz_mat_ncols(cache->hnf_basis) == columns &&
             flint::fmpz_mat_equal(
                     flint::FmpzMatConstRef(cache->hnf_basis),
-                    flint::FmpzMatConstRef(candidate.hnf_basis_));
+                    flint::FmpzMatConstRef(hnf_basis));
+
+    FiniteAbelianGroup candidate;
+    candidate.relations_.swap(relations);
+    candidate.hnf_basis_.swap(hnf_basis);
+    candidate.snf_ = flint::FmpzMat(columns, columns);
+    candidate.left_transform_ = flint::FmpzMat(0, 0);
+    candidate.right_transform_ = flint::FmpzMat(columns, columns);
+    candidate.right_transform_inv_ = flint::FmpzMat(columns, columns);
+    candidate.generator_count_ = columns;
+
     if (reuse) {
         flint::fmpz_mat_set(flint::FmpzMatRef(candidate.snf_),
                             flint::FmpzMatConstRef(cache->snf));

@@ -682,6 +682,12 @@ struct ClassGroupContextStorage {
     // from here.  Keyed only on the basis, of which S and V are a function,
     // so it stays valid across appends, factor-base rebuilds and clear().
     FiniteAbelianGroupSmithCache published_smith_form;
+    // The presentation a relation append took out of quotient_, kept so the
+    // next publish_presentation can republish into its storage: with an
+    // unchanged HNF basis only the relation rows are replaced
+    // (FiniteAbelianGroupAccess::take_relation_matrix_with_hnf_basis).  Never
+    // read as a presentation.
+    FiniteAbelianGroup retired_presentation;
     // Cyclotomic automorphism data for Galois images of relations, built
     // on first use for the order the relation search runs on
     // (relation_candidate.cpp, the Galois-image step).
@@ -777,6 +783,7 @@ struct ClassGroupContextStorage {
         generator_associates.clear();
         saturation_relation_scratch.clear();
         invalidate_reduced_relation_kernel();
+        retired_presentation.clear();
         cyclotomic_galois_images.clear();
         galois_image_relations = 0;
         galois_image_kernel_relations = 0;
