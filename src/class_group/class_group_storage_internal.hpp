@@ -19,6 +19,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <unordered_map>
 #include <vector>
 
 namespace silex::detail {
@@ -406,6 +407,56 @@ struct ReducedIdealLatticeCache {
     }
 };
 
+// Associate index of the keep_nonduplicate generator-relation path
+// (class_group.cpp, try_append_integral_generator_relation_).  One entry per
+// relation that path stored: the generator beta's order coordinates, |N(beta)|
+// and the index of its row in relations_.  A later candidate alpha with
+// |N(alpha)| = |N(beta)| and alpha / beta in the order generates the same
+// ideal (alpha / beta is then a unit), so the full test would factor it to
+// beta's stored row and end at the keep_nonduplicate duplicate skip; the
+// path applies that outcome without factoring alpha.  Entries only index
+// exact checks; they decide nothing else.  relations_ is append-only and
+// changes only together with this storage (swap, clear, the base
+// builders), so a recorded row index keeps naming beta's row.
+struct GeneratorAssociateEntry {
+    enum class State : unsigned char {
+        pending,   // the matrices below are not computed yet
+        ready,
+        unusable,  // they could not be formed; never matches
+    };
+
+    flint::Fmpz abs_norm;
+    flint::FmpzMat coordinates{0, 0};
+    slong stored_index = -1;
+    State state = State::pending;
+    // M, the order-coordinate matrix of multiplication by beta (row i holds
+    // the coordinates of w_i * beta), and M^-1 modulo a fixed word prime,
+    // row-major.  The pre-check accepts alpha only on an exact integer
+    // solution w of w * M = u (u: alpha's coordinates), that is, alpha =
+    // gamma * beta with gamma in the order; the residues only propose w.
+    flint::FmpzMat multiply{0, 0};
+    std::vector<ulong> inverse_residues;
+};
+
+struct GeneratorAssociateIndex {
+    std::vector<GeneratorAssociateEntry> entries;
+    // |N(beta)| mod a fixed prime -> entry index.
+    std::unordered_multimap<ulong, slong> norm_keys;
+    flint::Fmpz abs_norm;
+    // Scratch of the pre-check.
+    std::vector<ulong> residues;
+    flint::FmpzMat solution{0, 0};
+    flint::Fmpz sum;
+    // Candidates the path skipped through this index.
+    slong skipped_candidates = 0;
+
+    void clear() noexcept {
+        entries.clear();
+        norm_keys.clear();
+        skipped_candidates = 0;
+    }
+};
+
 // Residue-field quotient logarithms reused by local class-relation
 // saturation with units (`saturate_local_once_with_units_`).  Every value is
 // the exact `ResidueFieldQuotientLog::apply` image of one number-field
@@ -539,6 +590,7 @@ struct ClassGroupContextStorage {
     std::vector<RelationSaturationProofRecord>
             relation_saturation_proof_records;
     LocalSaturationDlogCache local_saturation_dlog_cache;
+    GeneratorAssociateIndex generator_associates;
     // Relation buffer of the local saturation passes (saturate_local_once_
     // and saturate_local_once_with_units_), kept across passes so its factor
     // base copy and storage are not rebuilt on every pass.  Each pass reuses
@@ -685,6 +737,7 @@ struct ClassGroupContextStorage {
         relation_saturation_records.clear();
         relation_saturation_proof_records.clear();
         local_saturation_dlog_cache.clear();
+        generator_associates.clear();
         saturation_relation_scratch.clear();
         invalidate_reduced_relation_kernel();
         cyclotomic_galois_images.clear();
@@ -734,6 +787,16 @@ public:
     static void record_skipped_dependent(
             ClassGroupContext& context) noexcept {
         ++context.skipped_dependent_relations_;
+    }
+
+    // Candidates the generator-relation associate pre-check skipped
+    // (GeneratorAssociateIndex).  White-box hook for its tests.
+    static slong generator_associate_skipped_candidates(
+            const ClassGroupContext& context) noexcept {
+        return context.private_storage_ == nullptr
+                ? 0
+                : context.private_storage_->generator_associates
+                          .skipped_candidates;
     }
 
     // Small-LLL torsion-orbit skip hooks (lll_relation_search.cpp).

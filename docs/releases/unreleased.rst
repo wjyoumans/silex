@@ -174,6 +174,17 @@ Changed
   as before.  See
   :doc:`../development/class_number_route_cutoff`.
 
+- The class-group relation search no longer factors a generator candidate
+  that generates the same ideal as a generator it already stored on the
+  duplicate-skipping path.  Two nonzero integral elements with equal absolute
+  norm generate the same ideal exactly when their quotient is integral, so the
+  search keys stored generators by absolute norm, checks the quotient, and
+  counts the candidate as a skipped dependent relation exactly as the
+  duplicate-row skip did.  Results and counters are unchanged.  Callgrind
+  instruction counts over ten small grh rows fall by 3.69% in total; the rows
+  ``x4_minus_7`` (+0.30%), ``iq34`` (+0.24%) and ``iq799`` (+0.10%) are
+  slightly slower.
+
 - The saturation proof scans (the stable scan and the proof-prime
   selectors) update the ``ell``-character kernel when a column is appended,
   intersecting the previous kernel with the new character as Hecke

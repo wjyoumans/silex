@@ -12065,6 +12065,213 @@ bool ClassGroupContext::try_append_generator_relation_with_norm_(
                                          generator_relation_policy_);
 }
 
+namespace {
+
+// 2^61 - 1; norm keys only index the exact checks below.
+constexpr ulong kGeneratorAssociateNormKeyPrime = UWORD(2305843009213693951);
+// 2^62 - 57, prime; the residues modulo it only propose a solution.
+constexpr ulong kGeneratorAssociateSolvePrime = UWORD(4611686018427387847);
+
+// Forms M and M^-1 mod p for `entry` (see GeneratorAssociateEntry).  Row i
+// of M is the sum over j of beta_j times row i * n + j of the order
+// multiplication table (the coordinates of w_i * w_j).  M^-1 mod p comes
+// from Gauss-Jordan elimination of [M | I] over F_p.  The entry stays
+// unusable, so it never matches, on any failure, including M singular
+// modulo p.  `base_order` is the order of the factor base, in whose basis
+// the coordinates are given; it must be `order`.
+void prepare_generator_associate_entry(detail::GeneratorAssociateEntry& entry,
+                                       Order& order,
+                                       const Order* base_order) noexcept {
+    entry.state = detail::GeneratorAssociateEntry::State::unusable;
+    const slong n = order.degree();
+    if (!same_order_parent(&order, base_order)) {
+        return;
+    }
+    const flint::FmpzMat* table =
+            detail::OrderAccess::multiplication_table(order);
+    if (table == nullptr || n <= 0 ||
+        fmpz_mat_nrows(table->raw()) != n * n ||
+        fmpz_mat_ncols(table->raw()) != n ||
+        fmpz_mat_nrows(entry.coordinates.raw()) != 1 ||
+        fmpz_mat_ncols(entry.coordinates.raw()) != n) {
+        return;
+    }
+    flint::FmpzMat multiply(n, n);
+    for (slong i = 0; i < n; ++i) {
+        for (slong j = 0; j < n; ++j) {
+            const fmpz* coefficient =
+                    fmpz_mat_entry(entry.coordinates.raw(), 0, j);
+            if (fmpz_is_zero(coefficient)) {
+                continue;
+            }
+            for (slong k = 0; k < n; ++k) {
+                fmpz_addmul(fmpz_mat_entry(multiply.raw(), i, k),
+                            coefficient,
+                            fmpz_mat_entry(table->raw(), i * n + j, k));
+            }
+        }
+    }
+
+    nmod_t mod;
+    nmod_init(&mod, kGeneratorAssociateSolvePrime);
+    const std::size_t width = static_cast<std::size_t>(2 * n);
+    std::vector<ulong> augmented(static_cast<std::size_t>(n) * width, 0);
+    auto at = [&](slong i, slong k) -> ulong& {
+        return augmented[static_cast<std::size_t>(i) * width +
+                         static_cast<std::size_t>(k)];
+    };
+    for (slong i = 0; i < n; ++i) {
+        for (slong k = 0; k < n; ++k) {
+            at(i, k) = fmpz_fdiv_ui(fmpz_mat_entry(multiply.raw(), i, k),
+                                    mod.n);
+        }
+        at(i, n + i) = 1;
+    }
+    for (slong k = 0; k < n; ++k) {
+        slong pivot = k;
+        while (pivot < n && at(pivot, k) == 0) {
+            ++pivot;
+        }
+        if (pivot == n) {
+            return;
+        }
+        if (pivot != k) {
+            for (slong c = 0; c < 2 * n; ++c) {
+                std::swap(at(pivot, c), at(k, c));
+            }
+        }
+        const ulong scale = n_invmod(at(k, k), mod.n);
+        for (slong c = k; c < 2 * n; ++c) {
+            at(k, c) = nmod_mul(at(k, c), scale, mod);
+        }
+        for (slong i = 0; i < n; ++i) {
+            const ulong factor = at(i, k);
+            if (i == k || factor == 0) {
+                continue;
+            }
+            for (slong c = k; c < 2 * n; ++c) {
+                at(i, c) = nmod_sub(at(i, c),
+                                    nmod_mul(factor, at(k, c), mod), mod);
+            }
+        }
+    }
+    entry.inverse_residues.assign(static_cast<std::size_t>(n * n), 0);
+    for (slong i = 0; i < n; ++i) {
+        for (slong k = 0; k < n; ++k) {
+            entry.inverse_residues[static_cast<std::size_t>(i * n + k)] =
+                    at(i, n + k);
+        }
+    }
+    entry.multiply.swap(multiply);
+    entry.state = detail::GeneratorAssociateEntry::State::ready;
+}
+
+// True when w * M = u has the integer solution proposed by the residues:
+// w = u * M^-1 mod p, lifted to (-p/2, p/2], checked exactly over Z.  A
+// solution outside that range is missed, never accepted wrongly.
+bool generator_associate_solution_exists(
+        detail::GeneratorAssociateIndex& index,
+        const detail::GeneratorAssociateEntry& entry,
+        const fmpz_mat_struct* coordinates,
+        slong n) noexcept {
+    nmod_t mod;
+    nmod_init(&mod, kGeneratorAssociateSolvePrime);
+    for (slong k = 0; k < n; ++k) {
+        ulong value = 0;
+        for (slong i = 0; i < n; ++i) {
+            value = nmod_add(
+                    value,
+                    nmod_mul(index.residues[static_cast<std::size_t>(i)],
+                             entry.inverse_residues[static_cast<std::size_t>(
+                                     i * n + k)],
+                             mod),
+                    mod);
+        }
+        fmpz* lifted = fmpz_mat_entry(index.solution.raw(), 0, k);
+        if (value > mod.n / 2) {
+            fmpz_set_ui(lifted, mod.n - value);
+            fmpz_neg(lifted, lifted);
+        } else {
+            fmpz_set_ui(lifted, value);
+        }
+    }
+    for (slong k = 0; k < n; ++k) {
+        fmpz_zero(index.sum.raw());
+        for (slong i = 0; i < n; ++i) {
+            fmpz_addmul(index.sum.raw(),
+                        fmpz_mat_entry(index.solution.raw(), 0, i),
+                        fmpz_mat_entry(entry.multiply.raw(), i, k));
+        }
+        if (!fmpz_equal(index.sum.raw(),
+                        fmpz_mat_entry(coordinates, 0, k))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// The stored row index of a recorded generator beta that is an associate of
+// the candidate alpha, or -1.  `index.abs_norm` holds |N(alpha)| and
+// `coordinates` alpha's order coordinates; `stored_rows` is the current
+// relation count.  A match needs |N(beta)| = |N(alpha)| exactly and an
+// integer w with w * M = u, that is, alpha = gamma * beta with gamma in the
+// order.  Then N(gamma) = +-1: the characteristic polynomial of gamma is
+// monic integral with constant term +-1, so gamma^-1 is an integral
+// polynomial in gamma and lies in the order too.  So gamma is a unit, alpha
+// and beta generate the same ideal, and the exponent row of alpha over the
+// factor base, which depends only on that ideal, is beta's stored row.  Any
+// failure only yields -1.
+slong find_stored_generator_associate(detail::GeneratorAssociateIndex& index,
+                                      Order& order,
+                                      const FactorBase& base,
+                                      const fmpz_mat_struct* coordinates,
+                                      slong stored_rows) noexcept {
+    if (index.entries.empty()) {
+        return -1;
+    }
+    const slong n = fmpz_mat_ncols(coordinates);
+    const ulong key = fmpz_fdiv_ui(index.abs_norm.raw(),
+                                   kGeneratorAssociateNormKeyPrime);
+    const auto range = index.norm_keys.equal_range(key);
+    bool residues_ready = false;
+    for (auto it = range.first; it != range.second; ++it) {
+        detail::GeneratorAssociateEntry& entry =
+                index.entries[static_cast<std::size_t>(it->second)];
+        if (entry.stored_index < 0 || entry.stored_index >= stored_rows ||
+            !fmpz_equal(entry.abs_norm.raw(), index.abs_norm.raw())) {
+            continue;
+        }
+        if (entry.state ==
+            detail::GeneratorAssociateEntry::State::pending) {
+            prepare_generator_associate_entry(entry, order, base.parent());
+        }
+        if (entry.state != detail::GeneratorAssociateEntry::State::ready ||
+            fmpz_mat_nrows(entry.multiply.raw()) != n) {
+            continue;
+        }
+        if (!residues_ready) {
+            index.residues.resize(static_cast<std::size_t>(n));
+            for (slong i = 0; i < n; ++i) {
+                index.residues[static_cast<std::size_t>(i)] = fmpz_fdiv_ui(
+                        fmpz_mat_entry(coordinates, 0, i),
+                        kGeneratorAssociateSolvePrime);
+            }
+            if (fmpz_mat_nrows(index.solution.raw()) != 1 ||
+                fmpz_mat_ncols(index.solution.raw()) != n) {
+                index.solution = flint::FmpzMat(1, n);
+            }
+            residues_ready = true;
+        }
+        if (generator_associate_solution_exists(index, entry, coordinates,
+                                                n)) {
+            return entry.stored_index;
+        }
+    }
+    return -1;
+}
+
+}  // namespace
+
 bool ClassGroupContext::try_append_integral_generator_relation_(
         bool& partial_throttle_exit,
         const Element& generator,
@@ -12089,6 +12296,50 @@ bool ClassGroupContext::try_append_integral_generator_relation_(
         return false;
     }
     Relation& relation = generator_relation_scratch_;
+
+    // Associate pre-check (GeneratorAssociateIndex).  Under keep_nonduplicate
+    // a candidate that generates the same ideal as a generator this path
+    // stored would factor to that stored row and end at the duplicate skip
+    // of append_relation_with_outcome_.  Apply exactly that outcome (the
+    // row capture, one skipped dependent relation, the log line) without
+    // factoring it.
+    const bool use_associate_index =
+            generator_relation_policy_ ==
+                    DependentRelationPolicy::keep_nonduplicate &&
+            private_storage_ != nullptr &&
+            fmpz_is_one(fmpq_denref(norm.raw())) &&
+            !fmpz_is_zero(fmpq_numref(norm.raw()));
+    if (use_associate_index) {
+        detail::GeneratorAssociateIndex& associates =
+                private_storage_->generator_associates;
+        fmpz_abs(associates.abs_norm.raw(), fmpq_numref(norm.raw()));
+        const slong stored_index = find_stored_generator_associate(
+                associates, parent_, *base, integral_coordinates.raw(),
+                relations_.length());
+        if (stored_index >= 0) {
+            if (private_storage_->generator_relation_row_capture != nullptr) {
+                flint::FmpzMat& capture =
+                        *private_storage_->generator_relation_row_capture;
+                private_storage_->generator_relation_row_captured =
+                        flint::fmpz_mat_nrows(flint::FmpzMatConstRef(
+                                capture)) == 1 &&
+                        flint::fmpz_mat_ncols(flint::FmpzMatConstRef(
+                                capture)) == generator_count();
+                if (private_storage_->generator_relation_row_captured) {
+                    relations_.rows_.row_ref(stored_index)
+                            .get_fmpz_mat_row(flint::FmpzMatRef(capture), 0);
+                }
+                private_storage_->generator_relation_row_capture = nullptr;
+            }
+            ++skipped_dependent_relations_;
+            ++associates.skipped_candidates;
+            SILEX_PROFILE_EVENT(diagnostics_, DiagnosticsModule::class_group,
+                                "class_group.generator_associate_skip");
+            SILEX_LOG(diagnostics_, DiagnosticsModule::class_group,
+                      LogLevel::detail, "skipped duplicate relation");
+            return true;
+        }
+    }
 
     if (!detail::RelationAccess::
                 set_relation_from_integral_coordinates_and_norm(
@@ -12125,8 +12376,29 @@ bool ClassGroupContext::try_append_integral_generator_relation_(
     }
 
     RelationAppendOutcome outcome = RelationAppendOutcome::none;
-    return append_relation_with_outcome_(outcome, relation, source,
-                                         generator_relation_policy_);
+    const slong stored_index = relations_.length();
+    if (!append_relation_with_outcome_(outcome, relation, source,
+                                       generator_relation_policy_)) {
+        return false;
+    }
+    if (use_associate_index && relations_.length() == stored_index + 1) {
+        // Record the stored generator for the associate pre-check.  A
+        // failure here only leaves it unrecorded.
+        detail::GeneratorAssociateIndex& associates =
+                private_storage_->generator_associates;
+        detail::GeneratorAssociateEntry entry;
+        entry.coordinates = flint::FmpzMat(1, parent_.degree());
+        flint::fmpz_mat_set(flint::FmpzMatRef(entry.coordinates),
+                            integral_coordinates);
+        fmpz_abs(entry.abs_norm.raw(), fmpq_numref(norm.raw()));
+        entry.stored_index = stored_index;
+        const ulong key = fmpz_fdiv_ui(entry.abs_norm.raw(),
+                                       kGeneratorAssociateNormKeyPrime);
+        associates.norm_keys.emplace(
+                key, static_cast<slong>(associates.entries.size()));
+        associates.entries.push_back(std::move(entry));
+    }
+    return true;
 }
 
 void ClassGroupContext::reset_partial_relations_() noexcept {
