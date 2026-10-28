@@ -1294,6 +1294,15 @@ flint_bitcnt_t word_quotient_log_baby_giant_index_bits(ulong ell) noexcept {
 // terminate the process on allocation failure.
 constexpr flint_bitcnt_t kWordQuotientLogBabyGiantMaxIndexBits = 24;
 
+// Whether the size of ell allows baby-step giant-step: ell has at least
+// kWordQuotientLogBabyGiantBits bits and its table needs at most
+// kWordQuotientLogBabyGiantMaxIndexBits index bits.
+bool word_quotient_log_baby_giant_size_ok(ulong ell) noexcept {
+    return FLINT_BIT_COUNT(ell) >= kWordQuotientLogBabyGiantBits &&
+           word_quotient_log_baby_giant_index_bits(ell) <=
+                   kWordQuotientLogBabyGiantMaxIndexBits;
+}
+
 // Quotient logs of `pending` by baby-step giant-step with one baby-step
 // table, as reference `baby_step_giant_step`
 // (NumFieldOrd/NfOrd/ResidueRingMultGrp.jl:716-738 at the same revision): m =
@@ -1426,9 +1435,7 @@ void word_quotient_log_resolve(
     }
 
     const ulong p_inverse = n_preinvert_limb(p_ui);
-    if (FLINT_BIT_COUNT(ell_ui) >= kWordQuotientLogBabyGiantBits &&
-        word_quotient_log_baby_giant_index_bits(ell_ui) <=
-                kWordQuotientLogBabyGiantMaxIndexBits &&
+    if (word_quotient_log_baby_giant_size_ok(ell_ui) &&
         zeta != 1 && n_is_prime(ell_ui) != 0 &&
         n_powmod2_ui_preinv(zeta, ell_ui, p_ui, p_inverse) == 1 &&
         word_quotient_log_baby_giant(out, resolved, pending, zeta, p_ui,
@@ -1571,6 +1578,10 @@ bool WordQuotientLogsTestEntry::logs(std::vector<ulong>& logs,
 flint_bitcnt_t WordQuotientLogsTestEntry::baby_giant_index_bits(
         ulong ell) noexcept {
     return word_quotient_log_baby_giant_index_bits(ell);
+}
+
+bool WordQuotientLogsTestEntry::baby_giant_size_ok(ulong ell) noexcept {
+    return word_quotient_log_baby_giant_size_ok(ell);
 }
 
 flint_bitcnt_t WordQuotientLogsTestEntry::baby_giant_max_index_bits()

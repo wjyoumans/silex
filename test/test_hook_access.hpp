@@ -304,6 +304,9 @@ public:
             ulong ell) noexcept {
         return WordQuotientLogsTestEntry::baby_giant_index_bits(ell);
     }
+    static bool word_quotient_log_baby_giant_size_ok(ulong ell) noexcept {
+        return WordQuotientLogsTestEntry::baby_giant_size_ok(ell);
+    }
     static flint_bitcnt_t word_quotient_log_baby_giant_max_index_bits()
             noexcept {
         return WordQuotientLogsTestEntry::baby_giant_max_index_bits();

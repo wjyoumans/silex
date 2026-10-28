@@ -7284,6 +7284,14 @@ int test_word_quotient_log_baby_giant_index_bits_boundary() {
                    top * top - 1) <= max_bits);
     assert(TestHookAccess::word_quotient_log_baby_giant_index_bits(top * top) >
            max_bits);
+    // The route predicate: an ell at the cap takes baby-step giant-step, one
+    // just above it takes the walk.
+    assert(TestHookAccess::word_quotient_log_baby_giant_size_ok(top * top - 1));
+    assert(!TestHookAccess::word_quotient_log_baby_giant_size_ok(top * top));
+    if (!TestHookAccess::word_quotient_log_baby_giant_size_ok(top * top - 1) ||
+        TestHookAccess::word_quotient_log_baby_giant_size_ok(top * top)) {
+        return 1;
+    }
     return 0;
 }
 
