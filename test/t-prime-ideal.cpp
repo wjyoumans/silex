@@ -2688,8 +2688,8 @@ silex::Order maximal_order_of_pure_cubic(silex::NumberField& field,
     return maximal;
 }
 
-// Valuations at each prime of a cubic order, for elements e_i + e_j and
-// p (e_i + e_j) (so valuations 0 and positive both occur): the public
+// Valuations at each prime of a cubic order, for elements e_i + e_j,
+// p (e_i + e_j) and p^3 (e_i + e_j) (so valuations 0 and positive both occur): the public
 // valuation and the anti-uniformizer route (word-size mod-p screen when p
 // fits a word) must agree with power containment.
 void check_cubic_valuations(const silex::PrimeIdealList& primes,
@@ -2700,17 +2700,17 @@ void check_cubic_valuations(const silex::PrimeIdealList& primes,
         for (slong k = 0; k < primes.size(); ++k) {
             for (slong i = 0; i < 3; ++i) {
                 for (slong j = 0; j < 3; ++j) {
-                    for (slong kind = 0; kind < 2; ++kind) {
+                    for (slong kind = 0; kind < 3; ++kind) {
                         sflint::FmpzMat coordinates(1, 3);
                         fmpz_set_ui(fmpz_mat_entry(coordinates.raw(), 0, i), 1);
-                        if (kind == 0) {
-                            fmpz_add_ui(fmpz_mat_entry(coordinates.raw(), 0, j),
-                                        fmpz_mat_entry(coordinates.raw(), 0, j),
-                                        1);
-                        } else {
-                            fmpz_add_ui(fmpz_mat_entry(coordinates.raw(), 0, j),
-                                        fmpz_mat_entry(coordinates.raw(), 0, j),
-                                        1);
+                        fmpz_add_ui(fmpz_mat_entry(coordinates.raw(), 0, j),
+                                    fmpz_mat_entry(coordinates.raw(), 0, j),
+                                    1);
+                        // kind 2 scales by p^3: with 2^63 < p < 2^64 the
+                        // word path holds x mod p only, so every step needs
+                        // the exact catch-up product.
+                        for (slong power = 0; power < (kind == 2 ? 3 : kind);
+                             ++power) {
                             fmpz_mat_scalar_mul_fmpz(coordinates.raw(),
                                                      coordinates.raw(),
                                                      p.raw());
@@ -3649,6 +3649,129 @@ int test_valuation_anti_uniformizer_matches_containment() {
     // The public valuation (not only the test hook) took the route.
     assert(route_counter.count > 0);
 #endif
+    return 0;
+}
+
+// The word-size path of the coordinate-divisibility valuation runs on x
+// modulo q = p^k (k = 63 for p = 2; k = 19 for p = 3 in degrees 3 and 8,
+// where n (q - 1)^2 < 2^64), for at most k steps before it advances the
+// exact x.  The values checked do not depend on k, only the coverage does.
+// Elements p^m u, with v_P(u) from power containment and
+// v_P(p^m u) = m e(P) + v_P(u), place the valuation just below, at and just
+// above k and 2k, and the bounds around those values and around k, so a
+// screen read beyond the precision of x mod q, or a lost exact catch-up,
+// changes the value.  Half the elements are also scaled by p 2^70 + 1, a
+// unit at P, so the coordinates reduced modulo q are multiword.
+int test_coordinate_valuation_word_power_chunks() {
+    struct Case {
+        std::vector<slong> coefficients;
+        slong p;
+    };
+    const std::vector<Case> cases = {
+            // x^3 - 10: 3 = P^2 Q divides the index.
+            {{-10, 0, 0, 1}, 3},
+            // Q(sqrt(2), sqrt(3)): 2 is ramified and divides the index.
+            {{1, 0, -10, 0, 1}, 2},
+            // polredabs of Q(sqrt(-23), sqrt(-31), sqrt(-47)): 2 and 3
+            // divide the index.
+            {{34784, -16936, 19212, -4654, 2583, -310, 108, -4, 1}, 2},
+            {{34784, -16936, 19212, -4654, 2583, -310, 108, -4, 1}, 3},
+    };
+    slong checked = 0;
+    slong checked_beyond_two_chunks = 0;
+    for (const Case& test_case : cases) {
+        sflint::FmpqPoly polynomial;
+        for (std::size_t i = 0; i < test_case.coefficients.size(); ++i) {
+            sflint::fmpq_poly_set_coeff_si(polynomial,
+                                           static_cast<slong>(i),
+                                           test_case.coefficients[i]);
+        }
+        silex::NumberField field;
+        silex::Order equation;
+        equation = order_by_polynomial(field, polynomial);
+        silex::Order maximal(field);
+        assert(maximal.maximal_order(equation));
+        const slong n = maximal.degree();
+        sflint::Fmpz p;
+        assert(set_fmpz_si(p, test_case.p));
+        const slong k = test_case.p == 2 ? 63 : 19;
+        sflint::Fmpz unit;
+        fmpz_mul_2exp(unit.raw(), p.raw(), 70);
+        fmpz_add_ui(unit.raw(), unit.raw(), 1);
+
+        silex::PrimeIdealList primes;
+        assert(silex::decompose_prime(primes, maximal,
+                                      sflint::FmpzConstRef(p)));
+        for (slong prime_index = 0; prime_index < primes.size();
+             ++prime_index) {
+            const silex::PrimeIdeal* prime = primes.at(prime_index);
+            assert(prime != nullptr);
+            const slong e = prime->ramification_index();
+            for (slong t = 0; t < 4; ++t) {
+                sflint::FmpzMat base(1, n);
+                bool nonzero = false;
+                for (slong j = 0; j < n; ++j) {
+                    const slong c = ((7 * t + 3 * j + j * j * t) % 11) - 5;
+                    fmpz_set_si(fmpz_mat_entry(base.raw(), 0, j), c);
+                    nonzero = nonzero || c != 0;
+                }
+                if (!nonzero) {
+                    continue;
+                }
+                silex::OrderElement u(maximal);
+                assert(u.set_coordinates(sflint::FmpzMatConstRef(base)));
+                slong base_value = -1;
+                assert(silex::detail::TestHookAccess::
+                               valuation_by_power_containment(
+                                       base_value, *prime, u, 40));
+                assert(base_value < 40);
+                for (slong target : {k - 1, k, k + 1, 2 * k + 1}) {
+                    // Smallest m with m e + v_P(u) >= target.
+                    slong m = (target - base_value + e - 1) / e;
+                    m = m < 0 ? 0 : m;
+                    const slong expected = base_value + m * e;
+                    sflint::FmpzMat coordinates(1, n);
+                    fmpz_mat_set(coordinates.raw(), base.raw());
+                    sflint::Fmpz scale;
+                    fmpz_pow_ui(scale.raw(), p.raw(), static_cast<ulong>(m));
+                    if (t % 2 == 1) {
+                        fmpz_mul(scale.raw(), scale.raw(), unit.raw());
+                    }
+                    fmpz_mat_scalar_mul_fmpz(coordinates.raw(),
+                                             coordinates.raw(), scale.raw());
+                    silex::OrderElement element(maximal);
+                    assert(element.set_coordinates(
+                            sflint::FmpzMatConstRef(coordinates)));
+                    slong public_value = -1;
+                    assert(prime->valuation(public_value, element));
+                    assert(public_value == expected);
+                    for (slong bound :
+                         {k - 1, k, k + 1, expected - 1, expected,
+                          expected + 1, expected + 2 * k}) {
+                        if (bound < 0) {
+                            continue;
+                        }
+                        slong value = -1;
+                        if (!silex::detail::TestHookAccess::
+                                    anti_uniformizer_valuation(
+                                            value, *prime, element, bound)) {
+                            // Only P = pO has no anti-uniformizer condition.
+                            assert(e == 1 && prime->residue_degree() == n);
+                            continue;
+                        }
+                        assert(value ==
+                               (expected < bound ? expected : bound));
+                        ++checked;
+                        if (expected > 2 * k && bound > 2 * k) {
+                            ++checked_beyond_two_chunks;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert(checked > 0);
+    assert(checked_beyond_two_chunks > 0);
     return 0;
 }
 
@@ -6610,6 +6733,7 @@ int main(int argc, char** argv) {
     assert(test_valuation_power_containment_matches_definition() == 0);
     assert(test_valuation_power_containment_matches_gp() == 0);
     assert(test_valuation_anti_uniformizer_matches_containment() == 0);
+    assert(test_coordinate_valuation_word_power_chunks() == 0);
     assert(test_principal_ideal_valuation_matches_element_valuation() ==
            0);
     assert(test_valuation_fractional_element_and_factored() == 0);

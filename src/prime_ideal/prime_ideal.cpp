@@ -815,41 +815,65 @@ bool quotient_multiplier_matrix(flint::FmpzMat& out,
            order_multiplier_matrix_from_coordinates(out, order, multiplier);
 }
 
-// True when p is an integer >= 2 that fits in a word, the modulus of the
-// word-size divisibility screen in `valuation_by_coordinate_divisibility`.
-bool coordinate_screen_modulus(ulong& out, flint::FmpzConstRef p) noexcept {
+// True when p is an integer >= 2 that fits in a word.  Then `power` is
+// p^exponent for the largest exponent >= 1 with p^exponent < 2^FLINT_BITS
+// and, for odd p, n (p^exponent - 1)^2 < 2^FLINT_BITS, so that the length-n
+// dot products of the word-size path of
+// `valuation_by_coordinate_divisibility` accumulate in one word (for
+// p = 2, FLINT's power-of-two dot product needs no bound).  That is the
+// modulus of that path.
+bool coordinate_screen_modulus(ulong& p_word,
+                               ulong& power,
+                               slong& exponent,
+                               flint::FmpzConstRef p,
+                               slong n) noexcept {
     if (fmpz_sgn(p.raw()) <= 0 || fmpz_abs_fits_ui(p.raw()) == 0 ||
-        fmpz_cmp_ui(p.raw(), 2) < 0) {
+        fmpz_cmp_ui(p.raw(), 2) < 0 || n < 1) {
         return false;
     }
-    out = fmpz_get_ui(p.raw());
+    p_word = fmpz_get_ui(p.raw());
+    power = p_word;
+    exponent = 1;
+    while (power <= UWORD_MAX / p_word) {
+        const ulong next = power * p_word;
+        if (p_word != 2) {
+            ulong high = 0;
+            ulong low = 0;
+            umul_ppmm(high, low, next - 1, next - 1);
+            if (high != 0 || n_mulhi(low, static_cast<ulong>(n)) != 0) {
+                break;
+            }
+        }
+        power = next;
+        ++exponent;
+    }
     return true;
 }
 
-// The n x n multiplier matrix M modulo the word p, transposed so that column
-// j of x M is the contiguous range [j n, (j + 1) n).
+// The n x n multiplier matrix M modulo the word `modulus`, transposed so
+// that column j of x M is the contiguous range [j n, (j + 1) n).
 void multiplier_matrix_mod_word(std::vector<ulong>& out,
                                 flint::FmpzMatConstRef multiplier_matrix,
-                                ulong p) noexcept {
+                                ulong modulus) noexcept {
     const slong n = fmpz_mat_ncols(multiplier_matrix.raw());
     out.assign(static_cast<std::size_t>(n * n), 0);
     for (slong i = 0; i < n; ++i) {
         for (slong j = 0; j < n; ++j) {
             out[static_cast<std::size_t>(j * n + i)] = fmpz_fdiv_ui(
-                    fmpz_mat_entry(multiplier_matrix.raw(), i, j), p);
+                    fmpz_mat_entry(multiplier_matrix.raw(), i, j), modulus);
         }
     }
 }
 
-// `multiplier_mod_p`, when not null, is `multiplier_matrix_mod_word` of
-// `multiplier_matrix` and p; otherwise it is computed here when p fits in a
-// word.
+// `multiplier_mod_power`, when not null, is `multiplier_matrix_mod_word` of
+// `multiplier_matrix` and the `power` of `coordinate_screen_modulus`;
+// otherwise it is computed here when p fits in a word.
 bool valuation_by_coordinate_divisibility(
         slong& out,
         const Order& order,
         const OrderElement& element,
         flint::FmpzMatConstRef multiplier_matrix,
-        const ulong* multiplier_mod_p,
+        const ulong* multiplier_mod_power,
         flint::FmpzConstRef p,
         slong bound,
         const DiagnosticsContext* diagnostics) noexcept {
@@ -858,11 +882,15 @@ bool valuation_by_coordinate_divisibility(
     // is divisible by p.  The cached map is reference's T/u map expressed in the
     // active equation or maximal-order basis.
     //
-    // When p fits in a word, each step first evaluates tau * x modulo p, from
-    // x mod p and M mod p (reduction modulo p is a ring map Z -> Z/pZ, so
-    // every coordinate of x M is divisible by p iff (x mod p)(M mod p) = 0).
-    // The step that ends the loop then costs one word-size product, and the
-    // exact product is formed only when it is divided by p.
+    // When p fits in a word, the loop runs on x modulo q = p^k, the power of
+    // p from `coordinate_screen_modulus` (k >= 1).  Reduction modulo q is a ring map
+    // Z -> Z/qZ, so if r = x_v mod p^(k-s) then r M = x_v M mod p^(k-s), and
+    // every coordinate of x_v M is divisible by p iff every coordinate of
+    // r M mod q is (k - s >= 1).  The step divides r M mod q, a multiple of
+    // p, by p, which gives x_(v+1) mod p^(k-s-1).  So k steps run in word
+    // arithmetic from x mod q; after k passing steps the exact x is advanced
+    // by k exact products, and the next k steps start from its reduction.
+    // The steps tested and the returned value are those of the exact loop.
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::prime_ideal,
                         "prime_ideal.valuation_coordinate_divisibility");
     if (bound < 0 ||
@@ -887,40 +915,14 @@ bool valuation_by_coordinate_divisibility(
     }
 
     ulong p_word = 0;
-    const bool screen = coordinate_screen_modulus(p_word, p);
-    nmod_t mod{};
-    dot_params_t dot_params{};
-    std::vector<ulong> local_mod_p;
-    std::vector<ulong> residue;
-    if (screen) {
-        nmod_init(&mod, p_word);
-        dot_params = _nmod_vec_dot_params(static_cast<ulong>(n), mod);
-        if (multiplier_mod_p == nullptr) {
-            multiplier_matrix_mod_word(local_mod_p, multiplier_matrix, p_word);
-            multiplier_mod_p = local_mod_p.data();
-        }
-        residue.resize(static_cast<std::size_t>(n));
-    }
-
-    slong value = 0;
-    while (value < bound) {
-        if (screen) {
-            for (slong i = 0; i < n; ++i) {
-                residue[static_cast<std::size_t>(i)] = fmpz_fdiv_ui(
-                        fmpz_mat_entry(current.raw(), 0, i), p_word);
-            }
-            for (slong j = 0; j < n; ++j) {
-                if (_nmod_vec_dot(residue.data(), multiplier_mod_p + j * n, n,
-                                  mod, dot_params) != 0) {
-                    out = value;
-                    return true;
-                }
-            }
-        }
-        flint::fmpz_mat_mul(flint::FmpzMatRef(product),
-                            flint::FmpzMatConstRef(current),
-                            multiplier_matrix);
-        if (!screen) {
+    ulong power = 0;
+    slong exponent = 0;
+    if (!coordinate_screen_modulus(p_word, power, exponent, p, n)) {
+        slong value = 0;
+        while (value < bound) {
+            flint::fmpz_mat_mul(flint::FmpzMatRef(product),
+                                flint::FmpzMatConstRef(current),
+                                multiplier_matrix);
             for (slong j = 0; j < n; ++j) {
                 if (fmpz_divisible(fmpz_mat_entry(product.raw(), 0, j),
                                    p.raw()) == 0) {
@@ -928,13 +930,62 @@ bool valuation_by_coordinate_divisibility(
                     return true;
                 }
             }
+            fmpz_mat_scalar_divexact_fmpz(current.raw(), product.raw(),
+                                          p.raw());
+            ++value;
         }
-        fmpz_mat_scalar_divexact_fmpz(current.raw(), product.raw(), p.raw());
-        ++value;
+        out = value;
+        return true;
     }
 
-    out = value;
-    return true;
+    nmod_t mod{};
+    nmod_init(&mod, power);
+    const dot_params_t dot_params =
+            _nmod_vec_dot_params(static_cast<ulong>(n), mod);
+    std::vector<ulong> local_mod_power;
+    if (multiplier_mod_power == nullptr) {
+        multiplier_matrix_mod_word(local_mod_power, multiplier_matrix, power);
+        multiplier_mod_power = local_mod_power.data();
+    }
+    std::vector<ulong> residue(static_cast<std::size_t>(n));
+    std::vector<ulong> next(static_cast<std::size_t>(n));
+
+    slong value = 0;
+    for (;;) {
+        for (slong i = 0; i < n; ++i) {
+            residue[static_cast<std::size_t>(i)] = fmpz_fdiv_ui(
+                    fmpz_mat_entry(current.raw(), 0, i), power);
+        }
+        const slong chunk_start = value;
+        const slong chunk_end =
+                bound - value > exponent ? value + exponent : bound;
+        while (value < chunk_end) {
+            for (slong j = 0; j < n; ++j) {
+                const ulong y = _nmod_vec_dot(residue.data(),
+                                              multiplier_mod_power + j * n,
+                                              n, mod, dot_params);
+                if (y % p_word != 0) {
+                    out = value;
+                    return true;
+                }
+                next[static_cast<std::size_t>(j)] = y / p_word;
+            }
+            residue.swap(next);
+            ++value;
+        }
+        if (value == bound) {
+            out = value;
+            return true;
+        }
+        // k passing steps: advance the exact x by the k exact divisions.
+        for (slong step = chunk_start; step < value; ++step) {
+            flint::fmpz_mat_mul(flint::FmpzMatRef(product),
+                                flint::FmpzMatConstRef(current),
+                                multiplier_matrix);
+            fmpz_mat_scalar_divexact_fmpz(current.raw(), product.raw(),
+                                          p.raw());
+        }
+    }
 }
 
 bool anti_uniformizer_multiplier_matrix(flint::FmpzMat& out,
@@ -3084,23 +3135,29 @@ struct PrimeIdeal::CoordinateValuationCache {
         : multiplier_matrix(degree, degree) {}
 
     // Call once `multiplier_matrix` is final.
-    void set_multiplier_mod_p(flint::FmpzConstRef p) noexcept {
+    void set_multiplier_mod_power(flint::FmpzConstRef p) noexcept {
         ulong p_word = 0;
-        if (coordinate_screen_modulus(p_word, p)) {
+        ulong power = 0;
+        slong exponent = 0;
+        if (coordinate_screen_modulus(
+                    p_word, power, exponent, p,
+                    fmpz_mat_ncols(multiplier_matrix.raw()))) {
             multiplier_matrix_mod_word(
-                    multiplier_mod_p,
-                    flint::FmpzMatConstRef(multiplier_matrix), p_word);
+                    multiplier_mod_power,
+                    flint::FmpzMatConstRef(multiplier_matrix), power);
         }
     }
 
-    const ulong* multiplier_mod_p_or_null() const noexcept {
-        return multiplier_mod_p.empty() ? nullptr : multiplier_mod_p.data();
+    const ulong* multiplier_mod_power_or_null() const noexcept {
+        return multiplier_mod_power.empty() ? nullptr
+                                            : multiplier_mod_power.data();
     }
 
     flint::FmpzMat multiplier_matrix;
-    // `multiplier_matrix_mod_word` of `multiplier_matrix`; empty when p does
-    // not fit in a word.
-    std::vector<ulong> multiplier_mod_p;
+    // `multiplier_matrix_mod_word` of `multiplier_matrix` and the word power
+    // of p from `coordinate_screen_modulus`; empty when p does not fit in a
+    // word.
+    std::vector<ulong> multiplier_mod_power;
     // True when the map is the anti-uniformizer from the HNF of P rather
     // than the Kummer quotient map T/u.
     bool from_anti_uniformizer = false;
@@ -3321,7 +3378,7 @@ PrimeIdeal::coordinate_valuation_matrix_cached() const noexcept {
         return nullptr;
     }
 
-    next->set_multiplier_mod_p(flint::FmpzConstRef(p_));
+    next->set_multiplier_mod_power(flint::FmpzConstRef(p_));
     coordinate_valuation_cache_ = std::move(next);
     return &coordinate_valuation_cache_->multiplier_matrix;
 }
@@ -3849,7 +3906,7 @@ bool PrimeIdeal::valuation_with_norm_vp_impl(
         valuation_by_coordinate_divisibility(
                 out, parent_, element,
                 flint::FmpzMatConstRef(*multiplier),
-                coordinate_valuation_cache_->multiplier_mod_p_or_null(),
+                coordinate_valuation_cache_->multiplier_mod_power_or_null(),
                 flint::FmpzConstRef(p_), bound, diagnostics)) {
         SILEX_PRIME_IDEAL_PROFILE_EVENT(
                 diagnostics,
@@ -3904,7 +3961,7 @@ bool PrimeIdeal::valuation_with_norm_vp_impl(
                         next->multiplier_matrix, parent_, integral_ideal(),
                         flint::FmpzConstRef(p_))) {
                 next->from_anti_uniformizer = true;
-                next->set_multiplier_mod_p(flint::FmpzConstRef(p_));
+                next->set_multiplier_mod_power(flint::FmpzConstRef(p_));
                 coordinate_valuation_cache_ = std::move(next);
                 multiplier = &coordinate_valuation_cache_->multiplier_matrix;
             }
@@ -3913,7 +3970,7 @@ bool PrimeIdeal::valuation_with_norm_vp_impl(
             valuation_by_coordinate_divisibility(
                     out, parent_, element,
                     flint::FmpzMatConstRef(*multiplier),
-                    coordinate_valuation_cache_->multiplier_mod_p_or_null(),
+                    coordinate_valuation_cache_->multiplier_mod_power_or_null(),
                     flint::FmpzConstRef(p_), bound, diagnostics)) {
             SILEX_PRIME_IDEAL_PROFILE_EVENT(
                     diagnostics,
