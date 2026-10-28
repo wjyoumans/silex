@@ -840,7 +840,7 @@ bool coordinate_screen_modulus(ulong& p_word,
             ulong high = 0;
             ulong low = 0;
             umul_ppmm(high, low, next - 1, next - 1);
-            if (high != 0 || n_mulhi(low, static_cast<ulong>(n)) != 0) {
+            if (high != 0 || low > UWORD_MAX / static_cast<ulong>(n)) {
                 break;
             }
         }
