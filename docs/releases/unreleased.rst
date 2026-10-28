@@ -152,12 +152,14 @@ Changed
   at the lifted p-adic root of the defining polynomial (Newton lifting,
   Cohen, GTM 138, Section 3.5) instead of reducing modulo the lifted linear
   factor.  The valuations are bit-for-bit those of the generic path.
-  Primes dividing the index and non-monogenic orders keep the generic
-  path.  Outputs are identical on the proven and grh corpora with timing
+  Only maximal equation orders (prime ideals with residue degree and
+  ramification index one) take the new route; other orders and primes keep
+  their existing path.  Outputs are identical on the proven and grh corpora with timing
   keys removed (171 grh rows and 167 proven rows; the rows that time out
   on both builds are excluded).  Measured in Ir only, on a busy machine:
   ``imaginary_quadratic_d10000000799`` proven falls 13.08% (1,229.0M to
-  1,068.2M) and ``real_quadratic_d10000000005`` proven 5.06%.  Across all
+  1,068.2M) and ``real_quadratic_d10000000005`` proven 5.06% against
+  commit c32b5e95.  Across all
   171 grh rows and the 158 proven rows under 10 s, no row rises more than
   0.13%.  No wall-clock claim is made.
 - The ``grh`` index bound used by validation now computes a refined

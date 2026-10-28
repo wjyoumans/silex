@@ -6901,6 +6901,99 @@ int test_valuation_degree_one_hensel_matches_generic() {
     return 0;
 }
 
+// Closed-form valuations far above the power-containment range.  In
+// Z[x]/(x^2 - c1 x + c0) with two split primes P, Q over p, take a and b
+// of prime norm p, a in P and b in Q.  Then for a^m b^n p^j the valuation
+// at P is m + j and at Q is n + j, up to 153 here, so p^k is multiword and
+// v_P(a) = k (the capped value) occurs.  The public valuation must hit
+// these values exactly on the degree-one cache, with large and small bounds
+// interleaved.
+int test_valuation_degree_one_hensel_closed_form() {
+    struct Case {
+        slong c0;
+        slong c1;
+        slong p;
+        slong a0;
+        slong a1;
+        slong b0;
+        slong b1;
+    };
+    // x^2 - x + 2 at 2: theta and theta - 1; x^2 + 1 at 5: 2 + i, 2 - i.
+    const std::vector<Case> cases = {{2, -1, 2, 0, 1, -1, 1},
+                                     {1, 0, 5, 2, 1, 2, -1}};
+    auto linear = [](const silex::Order& order, slong c0,
+                     slong c1) -> silex::OrderElement {
+        sflint::FmpzMat row(1, 2);
+        fmpz_set_si(fmpz_mat_entry(row.raw(), 0, 0), c0);
+        fmpz_set_si(fmpz_mat_entry(row.raw(), 0, 1), c1);
+        silex::OrderElement element(order);
+        assert(element.set_coordinates(sflint::FmpzMatConstRef(row)));
+        return element;
+    };
+    auto power = [&linear](const silex::Order& order,
+                           const silex::OrderElement& base,
+                           slong exponent) -> silex::OrderElement {
+        silex::OrderElement result = linear(order, 1, 0);
+        for (slong i = 0; i < exponent; ++i) {
+            silex::OrderElement next(order);
+            assert(next.multiply(result, base));
+            result = std::move(next);
+        }
+        return result;
+    };
+    slong checked = 0;
+    for (const Case& c : cases) {
+        sflint::FmpqPoly polynomial;
+        sflint::fmpq_poly_set_coeff_si(polynomial, 0, c.c0);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 1, c.c1);
+        sflint::fmpq_poly_set_coeff_si(polynomial, 2, 1);
+        silex::NumberField field;
+        silex::Order equation = order_by_polynomial(field, polynomial);
+        silex::Order maximal(field);
+        assert(maximal.maximal_order(equation));
+        assert(maximal.is_equation_order());
+        sflint::Fmpz p;
+        assert(set_fmpz_si(p, c.p));
+        silex::PrimeIdealList primes;
+        assert(silex::decompose_prime(primes, maximal,
+                                      sflint::FmpzConstRef(p)));
+        assert(primes.size() == 2);
+        const silex::OrderElement a = linear(maximal, c.a0, c.a1);
+        const silex::OrderElement b = linear(maximal, c.b0, c.b1);
+        const silex::OrderElement scalar = linear(maximal, c.p, 0);
+        for (slong i = 0; i < primes.size(); ++i) {
+            const silex::PrimeIdeal* prime = primes.at(i);
+            slong at_a = -1;
+            assert(prime->valuation(at_a, a));
+            assert(at_a == 0 || at_a == 1);
+            for (slong m : {90, 0, 3, 61, 1, 120, 7}) {
+                for (slong n : {0, 2, 40}) {
+                    for (slong j : {0, 1, 33}) {
+                        silex::OrderElement ab(maximal);
+                        silex::OrderElement element(maximal);
+                        assert(ab.multiply(power(maximal, a, m),
+                                           power(maximal, b, n)));
+                        assert(element.multiply(ab,
+                                                power(maximal, scalar, j)));
+                        slong value = -1;
+                        assert(prime->valuation(value, element));
+                        assert(value == (at_a == 1 ? m : n) + j);
+                        bool degree_one = false;
+                        slong exponent = 0;
+                        assert(silex::detail::TestHookAccess::
+                                       hensel_valuation_cache_state(
+                                               degree_one, exponent, *prime));
+                        assert(degree_one);
+                        ++checked;
+                    }
+                }
+            }
+        }
+    }
+    assert(checked == 2 * 2 * 7 * 3 * 3);
+    return 0;
+}
+
 int main(int argc, char** argv) {
     if (argc == 2 &&
         std::string_view(argv[1]) == "--primitive-root-agreement") {
@@ -6961,6 +7054,7 @@ int main(int argc, char** argv) {
     assert(test_valuation_power_containment_matches_gp() == 0);
     assert(test_valuation_anti_uniformizer_matches_containment() == 0);
     assert(test_valuation_degree_one_hensel_matches_generic() == 0);
+    assert(test_valuation_degree_one_hensel_closed_form() == 0);
     assert(test_coordinate_valuation_word_power_chunks() == 0);
     assert(test_principal_ideal_valuation_matches_element_valuation() ==
            0);
