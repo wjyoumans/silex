@@ -836,6 +836,157 @@ int test_explicit_maximal_order_decomposition() {
     return 0;
 }
 
+// The eager HNF of a decomposed prime P = p O + g O: the trust helper
+// decompose_prime used to call before set_data, on the generator g the
+// prime records (its Kummer generator, which is g reduced modulo p and so
+// spans the same ideal p O + g O, whose HNF is unique).
+bool eager_two_generator_hnf(silex::Ideal& out,
+                             const silex::PrimeIdeal& prime) noexcept {
+    const silex::Order* order = prime.parent();
+    if (order == nullptr) {
+        return false;
+    }
+    sflint::Fmpz p;
+    sflint::FmpzMat coordinates(1, order->degree());
+    silex::OrderElement generator(*order);
+    return prime.rational_prime(sflint::FmpzRef(p)) &&
+           prime.kummer_generator_coordinates(
+                   sflint::FmpzMatRef(coordinates)) &&
+           generator.set_coordinates(sflint::FmpzMatConstRef(coordinates)) &&
+           silex::detail::set_known_two_generator_ideal(
+                   out, sflint::FmpzConstRef(p), generator);
+}
+
+bool same_hnf(const silex::Ideal& left, const silex::Ideal& right) noexcept {
+    const silex::Order* order = left.parent();
+    if (order == nullptr) {
+        return false;
+    }
+    sflint::FmpzMat left_hnf(order->degree(), order->degree());
+    sflint::FmpzMat right_hnf(order->degree(), order->degree());
+    return left.get_hnf(sflint::FmpzMatRef(left_hnf)) &&
+           right.get_hnf(sflint::FmpzMatRef(right_hnf)) &&
+           fmpz_mat_equal(left_hnf.raw(), right_hnf.raw()) != 0;
+}
+
+bool prime_hnf_matches(const silex::PrimeIdeal& prime,
+                       const silex::Ideal& expected) noexcept {
+    const silex::Order* order = prime.parent();
+    if (order == nullptr) {
+        return false;
+    }
+    silex::Ideal stored(*order);
+    return prime.get_ideal(stored) && same_hnf(stored, expected);
+}
+
+// On a non-equation order, decompose_prime defers the HNF of
+// p O + g O to its first read.  Whichever consumer reads it first, the HNF
+// is the one the eager build stored, and reads of p, e, f and the residue
+// data leave it deferred.
+int test_deferred_two_generator_prime_hnf() {
+    using silex::detail::TestHookAccess;
+    sflint::FmpqPoly polynomial;
+    // x^3 - 19: [O_K : Z[theta]] = 3 (19 = 1 mod 9), so the maximal order
+    // is not the equation order.  11 = P_1 P_2 with f = 1, 2, and 19 = P^3.
+    poly_x3_minus(polynomial, 19);
+    silex::NumberField field;
+    silex::Order equation = order_by_polynomial(field, polynomial);
+    silex::Order maximal(field);
+    assert(maximal.maximal_order(equation));
+    assert(!maximal.is_equation_order());
+
+    for (const slong prime_value : {11, 19}) {
+        sflint::Fmpz p;
+        assert(set_fmpz_si(p, prime_value));
+        const sflint::FmpzConstRef p_ref(p);
+        silex::PrimeIdealList reference;
+        assert(silex::decompose_prime(reference, maximal, p_ref));
+        const slong count = reference.size();
+        assert(count == (prime_value == 11 ? 2 : 1));
+        assert(check_ef_sum(reference, 3));
+
+        std::vector<silex::Ideal> eager;
+        for (slong i = 0; i < count; ++i) {
+            const silex::PrimeIdeal& prime = *reference.at(i);
+            assert(TestHookAccess::prime_ideal_hnf_deferred(prime));
+            sflint::Fmpz value;
+            sflint::FmpzPoly residue;
+            assert(prime.rational_prime(sflint::FmpzRef(value)));
+            assert(prime.norm(sflint::FmpzRef(value)));
+            assert(prime.residue_polynomial(sflint::FmpzPolyRef(residue)));
+            assert(prime.ramification_index() > 0 &&
+                   prime.residue_degree() > 0);
+            assert(TestHookAccess::prime_ideal_hnf_deferred(prime));
+
+            eager.emplace_back(maximal);
+            assert(eager_two_generator_hnf(eager.back(), prime));
+            assert(TestHookAccess::prime_ideal_hnf_deferred(prime));
+            assert(prime_hnf_matches(prime, eager.back()));
+            assert(!TestHookAccess::prime_ideal_hnf_deferred(prime));
+        }
+
+        // The noninstalled accessor and the same-prime test, first readers.
+        silex::PrimeIdealList first, second;
+        assert(silex::decompose_prime(first, maximal, p_ref));
+        assert(silex::decompose_prime(second, maximal, p_ref));
+        for (slong i = 0; i < count; ++i) {
+            assert(same_hnf(PrimeIdealAccess::ideal(*first.at(i)),
+                            eager[static_cast<std::size_t>(i)]));
+            for (slong j = 0; j < count; ++j) {
+                assert(PrimeIdealAccess::same_prime_ideal(
+                               *second.at(i), *first.at(j)) == (i == j));
+            }
+            assert(prime_hnf_matches(*second.at(i),
+                                     eager[static_cast<std::size_t>(i)]));
+        }
+
+        // PrimeIdeal::equal and copies.  A copy carries the deferred state
+        // and builds the same HNF; the original stays deferred.
+        silex::PrimeIdealList third, fourth;
+        assert(silex::decompose_prime(third, maximal, p_ref));
+        assert(silex::decompose_prime(fourth, maximal, p_ref));
+        for (slong i = 0; i < count; ++i) {
+            for (slong j = 0; j < count; ++j) {
+                assert(third.at(i)->equal(*reference.at(j)) == (i == j));
+            }
+            silex::PrimeIdeal copy(maximal);
+            assert(copy.set(*fourth.at(i)));
+            assert(TestHookAccess::prime_ideal_hnf_deferred(copy));
+            assert(copy.equal(*reference.at(i)));
+            assert(TestHookAccess::prime_ideal_hnf_deferred(*fourth.at(i)));
+            assert(prime_hnf_matches(copy,
+                                     eager[static_cast<std::size_t>(i)]));
+            assert(prime_hnf_matches(*fourth.at(i),
+                                     eager[static_cast<std::size_t>(i)]));
+        }
+
+        // Valuations of an element and of an ideal, first readers: v_P(p) is
+        // e (P^2 and P^3 for p = 19), v_P(P_j) is 1 exactly when j = i, and
+        // the HNF read is the eager one.
+        silex::PrimeIdealList fifth, sixth;
+        assert(silex::decompose_prime(fifth, maximal, p_ref));
+        assert(silex::decompose_prime(sixth, maximal, p_ref));
+        silex::OrderElement p_element(maximal);
+        assert(p_element.set_si(prime_value));
+        for (slong i = 0; i < count; ++i) {
+            slong value = -1;
+            assert(fifth.at(i)->valuation(value, p_element));
+            assert(value == fifth.at(i)->ramification_index());
+            assert(prime_hnf_matches(*fifth.at(i),
+                                     eager[static_cast<std::size_t>(i)]));
+            for (slong j = 0; j < count; ++j) {
+                value = -1;
+                assert(sixth.at(i)->valuation(
+                        value, eager[static_cast<std::size_t>(j)]));
+                assert(value == (i == j ? 1 : 0));
+            }
+            assert(prime_hnf_matches(*sixth.at(i),
+                                     eager[static_cast<std::size_t>(i)]));
+        }
+    }
+    return 0;
+}
+
 int test_split_index_prime_uses_integral_quadratic_generator() {
     sflint::FmpqPoly polynomial;
     poly_x2_minus(polynomial, 17);
@@ -6419,6 +6570,7 @@ int main(int argc, char** argv) {
     assert(test_unsupported_order_failure_preserves_output() == 0);
     assert(test_quadratic_splitting_types() == 0);
     assert(test_explicit_maximal_order_decomposition() == 0);
+    assert(test_deferred_two_generator_prime_hnf() == 0);
     assert(test_split_index_prime_uses_integral_quadratic_generator() == 0);
     assert(test_index3_quartic_maximal_nonindex_prime_decomposition() == 0);
     assert(test_index2_cubic_unramified_prime_decomposition() == 0);

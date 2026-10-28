@@ -104,7 +104,12 @@ private:
     struct HenselValuationCache;
     struct ContainmentPowerCache;
     struct CoordinateValuationCache;
+    struct DeferredTwoGeneratorIdeal;
 
+    // The integral ideal P.  When the prime was stored with a deferred
+    // two-element generator (set_data_two_generator), the first call builds
+    // its HNF and later calls return the same stored ideal.
+    const Ideal& integral_ideal() const noexcept;
     bool set_data(flint::FmpzConstRef p,
                   slong ramification_index,
                   slong residue_degree,
@@ -115,6 +120,23 @@ private:
                              slong ramification_index,
                              slong residue_degree,
                              const Ideal& ideal) noexcept;
+    // As set_data for the ideal p O + generator O, whose HNF is built by
+    // detail::set_known_two_generator_ideal on the first read of the ideal
+    // instead of here.
+    bool set_data_two_generator(flint::FmpzConstRef p,
+                                slong ramification_index,
+                                slong residue_degree,
+                                const OrderElement& generator,
+                                flint::FmpzPolyConstRef residue_polynomial,
+                                bool residue_in_integral_generator) noexcept;
+    void store_data(flint::FmpzConstRef p,
+                    slong ramification_index,
+                    slong residue_degree,
+                    Ideal& ideal,
+                    std::unique_ptr<DeferredTwoGeneratorIdeal> deferred,
+                    flint::FmpzPolyConstRef residue_polynomial,
+                    bool has_residue_polynomial,
+                    bool residue_in_integral_generator) noexcept;
     bool set_kummer_generator(flint::FmpzMatConstRef generator) noexcept;
     const Ideal* containment_power_cached(
             slong exponent,
@@ -159,7 +181,11 @@ private:
 
     Order parent_;
     flint::Fmpz p_;
-    Ideal ideal_;
+    // Read through integral_ideal(), which may build the HNF first.
+    mutable Ideal ideal_storage_;
+    // Pending generator of P = p O + generator O whose HNF is not built
+    // yet; null once ideal_storage_ holds the HNF.
+    mutable std::unique_ptr<DeferredTwoGeneratorIdeal> deferred_ideal_;
     flint::FmpzMat kummer_generator_{0, 0};
     flint::FmpzPoly residue_poly_;
     flint::Fmpz linear_residue_root_;

@@ -330,6 +330,20 @@ Changed
   ``x^19 - x - 1`` (867.34M to 810.08M) and by 2.46% on ``x^16 - x - 1``
   (409.23M to 399.17M).
 
+- On orders other than the equation order, ``decompose_prime`` no longer
+  builds the Hermite normal form of each prime ``pO + gO`` when it decomposes
+  ``p``.  The prime keeps ``g`` and builds the same matrix, by the same
+  modular HNF, the first time the ideal itself is read (``get_ideal``,
+  membership and valuation, ``equal``, ideal powers); ``p``, ``e``, ``f``,
+  the norm and the residue data are available without it.  Copies carry the
+  pending generator.  Most primes the ``proven`` factor-base honesty check
+  decomposes are read only for ``p``, ``e`` and ``f``.  Outputs are
+  unchanged: all non-timing output fields are identical on the 36 ``proven``
+  corpus rows of degree at least 3 whose maximal order is not the equation
+  order.  Callgrind Ir of the whole ``proven`` process on
+  ``pure_x12_plus_7`` (RelWithDebInfo, busy machine) drops by 8.66%
+  (5,588.86M to 5,104.92M).
+
 - ``IdealFactorization::factor`` no longer multiplies the prime powers back
   together and compares the product with the input in release builds.  It
   now checks norm accounting instead: for every rational prime ``p`` dividing

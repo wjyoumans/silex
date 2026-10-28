@@ -259,8 +259,14 @@ public:
             return false;
         }
         return prime.set_data(flint::FmpzConstRef(prime.p_), prime.e_,
-                              prime.f_, prime.ideal_, residue_polynomial,
-                              false);
+                              prime.f_, prime.integral_ideal(),
+                              residue_polynomial, false);
+    }
+
+    // Whether `prime` still holds a deferred two-element generator, so its
+    // HNF has not been built yet (PrimeIdeal::integral_ideal builds it).
+    static bool prime_ideal_hnf_deferred(const PrimeIdeal& prime) noexcept {
+        return prime.deferred_ideal_ != nullptr;
     }
 
     // While set, compute_with_class_group clears its validation summary after

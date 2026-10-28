@@ -3106,6 +3106,15 @@ struct PrimeIdeal::CoordinateValuationCache {
     bool from_anti_uniformizer = false;
 };
 
+// The second generator of P = p O + generator O, kept until the HNF of P is
+// first read (PrimeIdeal::integral_ideal).
+struct PrimeIdeal::DeferredTwoGeneratorIdeal {
+    explicit DeferredTwoGeneratorIdeal(const Order& order) noexcept
+        : generator(order) {}
+
+    OrderElement generator;
+};
+
 PrimeIdeal::PrimeIdeal() noexcept = default;
 
 PrimeIdeal::PrimeIdeal(const Order& parent) noexcept {
@@ -3131,7 +3140,8 @@ PrimeIdeal& PrimeIdeal::operator=(PrimeIdeal&& other) noexcept {
 void PrimeIdeal::swap(PrimeIdeal& other) noexcept {
     parent_.swap(other.parent_);
     p_.swap(other.p_);
-    ideal_.swap(other.ideal_);
+    ideal_storage_.swap(other.ideal_storage_);
+    deferred_ideal_.swap(other.deferred_ideal_);
     kummer_generator_.swap(other.kummer_generator_);
     residue_poly_.swap(other.residue_poly_);
     linear_residue_root_.swap(other.linear_residue_root_);
@@ -3154,7 +3164,8 @@ void PrimeIdeal::swap(PrimeIdeal& other) noexcept {
 void PrimeIdeal::clear() noexcept {
     parent_.clear();
     fmpz_zero(p_.raw());
-    ideal_.clear();
+    ideal_storage_.clear();
+    deferred_ideal_.reset();
     kummer_generator_ = flint::FmpzMat(0, 0);
     fmpz_poly_zero(residue_poly_.raw());
     fmpz_zero(linear_residue_root_.raw());
@@ -3178,8 +3189,8 @@ bool PrimeIdeal::define(const Order& parent) noexcept {
 
     PrimeIdeal next;
     next.parent_ = parent;
-    next.ideal_ = Ideal(parent);
-    if (!next.ideal_.is_defined()) {
+    next.ideal_storage_ = Ideal(parent);
+    if (!next.ideal_storage_.is_defined()) {
         return false;
     }
 
@@ -3202,7 +3213,18 @@ bool PrimeIdeal::set(const PrimeIdeal& other) noexcept {
     }
 
     fmpz_set(copy.p_.raw(), other.p_.raw());
-    if (!copy.ideal_.set(other.ideal_)) {
+    if (other.deferred_ideal_ != nullptr) {
+        // Carry the deferred generator; the copy builds the same HNF on its
+        // own first read.
+        copy.deferred_ideal_.reset(new (std::nothrow)
+                                           DeferredTwoGeneratorIdeal(
+                                                   copy.parent_));
+        if (copy.deferred_ideal_ == nullptr ||
+            !copy.deferred_ideal_->generator.set(
+                    other.deferred_ideal_->generator)) {
+            return false;
+        }
+    } else if (!copy.ideal_storage_.set(other.ideal_storage_)) {
         return false;
     }
     copy.kummer_generator_ = flint::FmpzMat(
@@ -3228,11 +3250,31 @@ bool PrimeIdeal::set(const PrimeIdeal& other) noexcept {
 }
 
 bool PrimeIdeal::is_defined() const noexcept {
-    return parent_.is_defined() && ideal_.is_defined();
+    return parent_.is_defined() && ideal_storage_.is_defined();
 }
 
 bool PrimeIdeal::has_prime_data() const noexcept {
-    return is_defined() && has_prime_ && ideal_.has_hnf();
+    return is_defined() && has_prime_ &&
+           (ideal_storage_.has_hnf() || deferred_ideal_ != nullptr);
+}
+
+const Ideal& PrimeIdeal::integral_ideal() const noexcept {
+    if (deferred_ideal_ != nullptr) {
+        // The same call, on the same p and generator, that decompose_prime
+        // made eagerly before the HNF was deferred, so the stored HNF is
+        // unchanged.  set_data_two_generator made every check by which it can
+        // refuse; the ideal is left without an HNF only if it fails anyway,
+        // and then each later read retries.
+        Ideal built(parent_);
+        if (built.is_defined() &&
+            detail::set_known_two_generator_ideal(
+                    built, flint::FmpzConstRef(p_),
+                    deferred_ideal_->generator)) {
+            ideal_storage_.swap(built);
+            deferred_ideal_.reset();
+        }
+    }
+    return ideal_storage_;
 }
 
 const flint::FmpzMat*
@@ -3293,7 +3335,7 @@ const Ideal* PrimeIdeal::containment_power_cached(
         return nullptr;
     }
     if (exponent == 1) {
-        return &ideal_;
+        return &integral_ideal();
     }
 
     const std::size_t target =
@@ -3330,10 +3372,11 @@ const Ideal* PrimeIdeal::containment_power_cached(
                     diagnostics, DiagnosticsModule::prime_ideal,
                     "prime_ideal.valuation_containment_power_cache_multiply");
             if (cache.powers.empty()) {
-                if (!next.multiply(ideal_, ideal_)) {
+                if (!next.multiply(integral_ideal(), integral_ideal())) {
                     return nullptr;
                 }
-            } else if (!next.multiply(cache.powers.back(), ideal_)) {
+            } else if (!next.multiply(cache.powers.back(),
+                                      integral_ideal())) {
                 return nullptr;
             }
         }
@@ -3362,7 +3405,7 @@ bool PrimeIdeal::rational_prime(flint::FmpzRef out) const noexcept {
 
 bool PrimeIdeal::get_ideal(Ideal& out) const noexcept {
     return has_prime_data() && same_order_parent(out.parent(), &parent_) &&
-           out.set(ideal_);
+           out.set(integral_ideal());
 }
 
 bool PrimeIdeal::kummer_generator_coordinates(
@@ -3405,7 +3448,7 @@ bool PrimeIdeal::equal(const PrimeIdeal& other) const noexcept {
         !parent_.has_same_data(other.parent_) || e_ != other.e_ ||
         f_ != other.f_ ||
         fmpz_equal(p_.raw(), other.p_.raw()) == 0 ||
-        !ideal_.equal(other.ideal_) ||
+        !integral_ideal().equal(other.integral_ideal()) ||
         has_residue_poly_ != other.has_residue_poly_) {
         return false;
     }
@@ -3521,7 +3564,7 @@ bool PrimeIdeal::valuation_by_power_containment(
     {
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::prime_ideal,
                             "prime_ideal.valuation_containment_initial_contains");
-        if (!ideal_.contains(element)) {
+        if (!integral_ideal().contains(element)) {
             out = 0;
             return true;
         }
@@ -3822,7 +3865,7 @@ bool PrimeIdeal::valuation_with_norm_vp_impl(
             SILEX_PROFILE_SCOPE(
                     diagnostics, DiagnosticsModule::prime_ideal,
                     "prime_ideal.valuation_containment_initial_contains");
-            if (!ideal_.contains(element)) {
+            if (!integral_ideal().contains(element)) {
                 SILEX_PRIME_IDEAL_PROFILE_EVENT(
                         diagnostics,
                         "prime_ideal.valuation_order_element.path_not_in_prime");
@@ -3846,7 +3889,7 @@ bool PrimeIdeal::valuation_with_norm_vp_impl(
                             CoordinateValuationCache(parent_.degree()));
             if (next != nullptr &&
                 anti_uniformizer_multiplier_matrix(
-                        next->multiplier_matrix, parent_, ideal_,
+                        next->multiplier_matrix, parent_, integral_ideal(),
                         flint::FmpzConstRef(p_))) {
                 next->from_anti_uniformizer = true;
                 next->set_multiplier_mod_p(flint::FmpzConstRef(p_));
@@ -3920,7 +3963,7 @@ bool PrimeIdeal::valuation(slong& out,
                         "prime_ideal.valuation_ideal");
     if (!has_prime_data() || !same_order_parent(ideal.parent(), &parent_) ||
         !ideal.has_hnf() || !parent_.is_maximal() ||
-        ideal_.is_one() || f_ <= 0) {
+        integral_ideal().is_one() || f_ <= 0) {
         return false;
     }
 
@@ -3964,19 +4007,19 @@ bool PrimeIdeal::valuation(slong& out,
     SILEX_PRIME_IDEAL_PROFILE_EVENT(
             diagnostics, "prime_ideal.valuation_ideal.path_containment");
     slong value = 0;
-    if (ideal_.contains(ideal)) {
+    if (integral_ideal().contains(ideal)) {
         value = 1;
 
         if (value < bound) {
             Ideal power(parent_);
             Ideal next(parent_);
             if (!power.is_defined() || !next.is_defined() ||
-                !power.set(ideal_)) {
+                !power.set(integral_ideal())) {
                 return false;
             }
 
             while (value < bound) {
-                if (!next.multiply(power, ideal_) ||
+                if (!next.multiply(power, integral_ideal()) ||
                     !next.contains(ideal)) {
                     break;
                 }
@@ -4118,6 +4161,42 @@ bool PrimeIdeal::valuation(
     return true;
 }
 
+void PrimeIdeal::store_data(
+        flint::FmpzConstRef p,
+        slong ramification_index,
+        slong residue_degree,
+        Ideal& ideal,
+        std::unique_ptr<DeferredTwoGeneratorIdeal> deferred,
+        flint::FmpzPolyConstRef residue_polynomial,
+        bool has_residue_polynomial,
+        bool residue_in_integral_generator) noexcept {
+    fmpz_set(p_.raw(), p.raw());
+    ideal_storage_.swap(ideal);
+    deferred_ideal_ = std::move(deferred);
+    kummer_generator_ = flint::FmpzMat(0, 0);
+    if (has_residue_polynomial) {
+        fmpz_poly_set(residue_poly_.raw(), residue_polynomial.raw());
+        has_linear_residue_root_ = linear_root_from_residue_polynomial(
+                linear_residue_root_,
+                flint::FmpzPolyConstRef(residue_poly_), p);
+    } else {
+        fmpz_poly_zero(residue_poly_.raw());
+        fmpz_zero(linear_residue_root_.raw());
+        has_linear_residue_root_ = false;
+    }
+    hensel_valuation_cache_.reset();
+    containment_power_cache_.reset();
+    coordinate_valuation_cache_.reset();
+    e_ = ramification_index;
+    f_ = residue_degree;
+    has_prime_ = true;
+    has_kummer_generator_ = false;
+    has_residue_poly_ = has_residue_polynomial;
+    residue_in_integral_generator_ =
+            has_residue_polynomial && residue_in_integral_generator;
+    order_basis_p_integral_ = 0;
+}
+
 bool PrimeIdeal::set_data(
         flint::FmpzConstRef p,
         slong ramification_index,
@@ -4136,23 +4215,44 @@ bool PrimeIdeal::set_data(
         return false;
     }
 
-    fmpz_set(p_.raw(), p.raw());
-    ideal_.swap(ideal_copy);
-    kummer_generator_ = flint::FmpzMat(0, 0);
-    fmpz_poly_set(residue_poly_.raw(), residue_polynomial.raw());
-    has_linear_residue_root_ = linear_root_from_residue_polynomial(
-            linear_residue_root_, flint::FmpzPolyConstRef(residue_poly_),
-            p);
-    hensel_valuation_cache_.reset();
-    containment_power_cache_.reset();
-    coordinate_valuation_cache_.reset();
-    e_ = ramification_index;
-    f_ = residue_degree;
-    has_prime_ = true;
-    has_kummer_generator_ = false;
-    has_residue_poly_ = true;
-    residue_in_integral_generator_ = residue_in_integral_generator;
-    order_basis_p_integral_ = 0;
+    store_data(p, ramification_index, residue_degree, ideal_copy, nullptr,
+               residue_polynomial, true, residue_in_integral_generator);
+    return true;
+}
+
+bool PrimeIdeal::set_data_two_generator(
+        flint::FmpzConstRef p,
+        slong ramification_index,
+        slong residue_degree,
+        const OrderElement& generator,
+        flint::FmpzPolyConstRef residue_polynomial,
+        bool residue_in_integral_generator) noexcept {
+    // The checks set_data makes, with the generator in place of the ideal,
+    // and every check by which detail::set_known_two_generator_ideal can
+    // refuse a defined ideal of this order (generator in the same order,
+    // p > 0, an available multiplication table).  With them made here, the
+    // deferred build in integral_ideal() fails only where the eager build
+    // would have, so set_data_two_generator refuses what the eager
+    // set_known_two_generator_ideal + set_data sequence refuses.
+    if (!is_defined() || !same_order_parent(generator.parent(), &parent_) ||
+        fmpz_sgn(p.raw()) <= 0 || ramification_index <= 0 ||
+        residue_degree <= 0 ||
+        fmpz_poly_degree(residue_polynomial.raw()) <= 0 ||
+        detail::OrderAccess::multiplication_table(parent_) == nullptr) {
+        return false;
+    }
+
+    std::unique_ptr<DeferredTwoGeneratorIdeal> deferred(
+            new (std::nothrow) DeferredTwoGeneratorIdeal(parent_));
+    Ideal pending(parent_);
+    if (deferred == nullptr || !deferred->generator.set(generator) ||
+        !pending.is_defined()) {
+        return false;
+    }
+
+    store_data(p, ramification_index, residue_degree, pending,
+               std::move(deferred), residue_polynomial, true,
+               residue_in_integral_generator);
     return true;
 }
 
@@ -4170,22 +4270,8 @@ bool PrimeIdeal::set_data_no_residue(flint::FmpzConstRef p,
         return false;
     }
 
-    fmpz_set(p_.raw(), p.raw());
-    ideal_.swap(ideal_copy);
-    kummer_generator_ = flint::FmpzMat(0, 0);
-    fmpz_poly_zero(residue_poly_.raw());
-    fmpz_zero(linear_residue_root_.raw());
-    hensel_valuation_cache_.reset();
-    containment_power_cache_.reset();
-    coordinate_valuation_cache_.reset();
-    e_ = ramification_index;
-    f_ = residue_degree;
-    has_prime_ = true;
-    has_kummer_generator_ = false;
-    has_residue_poly_ = false;
-    has_linear_residue_root_ = false;
-    residue_in_integral_generator_ = false;
-    order_basis_p_integral_ = 0;
+    store_data(p, ramification_index, residue_degree, ideal_copy, nullptr,
+               flint::FmpzPolyConstRef(residue_poly_), false, false);
     return true;
 }
 
@@ -4630,7 +4716,7 @@ bool PrimeIdealAccess::anti_uniformizer_valuation(
     const slong n = prime.parent_.degree();
     flint::FmpzMat multiplier(n, n);
     return anti_uniformizer_multiplier_matrix(
-                   multiplier, prime.parent_, prime.ideal_,
+                   multiplier, prime.parent_, prime.integral_ideal(),
                    flint::FmpzConstRef(prime.p_)) &&
            valuation_by_coordinate_divisibility(
                    out, prime.parent_, element,
@@ -4804,6 +4890,7 @@ bool PrimeIdealAccess::set_defining_polynomial_factor_prime(
     Ideal candidate_ideal(order);
     flint::FmpzMat kummer_generator(1, order.degree());
     flint::FmpzPoly residue_polynomial;
+    bool deferred = false;
 
     if (!generator_element.is_defined() || !generator.is_defined() ||
         !candidate_ideal.is_defined()) {
@@ -4829,7 +4916,11 @@ bool PrimeIdealAccess::set_defining_polynomial_factor_prime(
         // p O + g(theta) O for the monic g = factor / lead;
         // set_known_factor_two_generator_ideal writes that HNF in closed
         // form as well (same source trace).  Other orders and any input the
-        // closed forms refuse take the general routine.
+        // closed forms refuse take the general routine,
+        // set_known_two_generator_ideal(p, generator), which is deferred to
+        // the first read of the ideal (set_data_two_generator): most primes
+        // decomposed for the factor-base honesty check are only read for
+        // p, e and f.
         bool stored = false;
         if (residue_degree == 1 && order.is_equation_order()) {
             flint::Fmpz lead, root;
@@ -4850,16 +4941,22 @@ bool PrimeIdealAccess::set_defining_polynomial_factor_prime(
             stored = set_known_factor_two_generator_ideal(
                     candidate_ideal, p, flint::FmpzPolyConstRef(lifted));
         }
-        if (!stored &&
-            !set_known_two_generator_ideal(candidate_ideal, p, generator)) {
-            return false;
-        }
+        deferred = !stored;
     }
     fmpz_mat_center_row_mod_prime(kummer_generator, 0, p);
 
     fmpz_mod_poly_get_fmpz_poly(residue_polynomial, factor, ctx);
-    return out.set_data(p, ramification_index, residue_degree, candidate_ideal,
-                        flint::FmpzPolyConstRef(residue_polynomial), false) &&
+    const bool data_set =
+            deferred ? out.set_data_two_generator(
+                               p, ramification_index, residue_degree,
+                               generator,
+                               flint::FmpzPolyConstRef(residue_polynomial),
+                               false)
+                     : out.set_data(p, ramification_index, residue_degree,
+                                    candidate_ideal,
+                                    flint::FmpzPolyConstRef(residue_polynomial),
+                                    false);
+    return data_set &&
            out.set_kummer_generator(flint::FmpzMatConstRef(kummer_generator));
 }
 

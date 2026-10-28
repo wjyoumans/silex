@@ -218,12 +218,13 @@ bool decompose_prime_residue_degrees(
 // data, and read-only access to recorded residue-map state.
 class PrimeIdealAccess {
 public:
-    // The integral ideal of `prime`, without the copy get_ideal makes.  Its
+    // The integral ideal of `prime`, without the copy get_ideal makes (it
+    // builds a deferred HNF first, as every read of the ideal does).  Its
     // HNF determines the prime ideal: two primes of one order are the same
     // prime exactly when these compare equal under Ideal::equal, whatever
     // residue data each construction recorded.
     static const Ideal& ideal(const PrimeIdeal& prime) noexcept {
-        return prime.ideal_;
+        return prime.integral_ideal();
     }
 
     // Whether `left` and `right`, two primes of one order, are the same
