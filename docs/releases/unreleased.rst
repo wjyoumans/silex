@@ -1706,9 +1706,11 @@ Changed
   ``grh`` mode, callgrind instruction counts fall 4.5%.  See "Local algebra
   and relations" in :doc:`../reference/algorithms_and_sources`.
 
-- On a maximal equation order, a class-group partial relation whose norm
+- On a maximal equation order whose defining polynomial is nice (monic
+  with integer coefficients), a class-group partial relation whose norm
   divides out completely over the factor base's rational primes no longer
-  factors the principal ideal to find its large prime.  The base-prime
+  factors the principal ideal to find its large prime.  Other orders and
+  defining polynomials still take the full factorization.  The base-prime
   valuations leave a norm deficit over at most one rational prime ``p``; only
   ``p`` is decomposed, and the large prime is the prime above ``p`` outside
   the base with valuation 1 and residue degree equal to the deficit.
