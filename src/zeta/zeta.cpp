@@ -4388,7 +4388,9 @@ bool bf_theorem7_error_bound(flint::Arb& out,
 // (1/log(X/9), with log(X/9) >= log 2, and beta, whose log difference is at
 // least 2/r > 2^-28 against radii near 2^-precision log r), so the Arb bound
 // at a skipped step would have been finite and positive, and the scan would
-// have moved on.
+// have moved on (an Arb accuracy property of arb_log_ui, not a documented
+// contract; a violation could only let the screened scan succeed where the
+// unscreened one fails, at a cutoff still accepted on its Arb bound).
 struct BfTheorem7Screen {
     bool enabled = false;
     double sigma_scale_lower = 0.0;  // lower bound of 2 sigma - 1
