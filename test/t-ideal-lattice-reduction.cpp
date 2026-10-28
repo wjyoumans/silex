@@ -21,6 +21,10 @@
 #include <silex/order_unit.hpp>
 #include <silex/prime_ideal.hpp>
 
+#include <flint/fmpz_lll.h>
+#include <flint/fmpz_mat.h>
+#include <flint/ulong_extras.h>
+
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -1127,6 +1131,123 @@ void run_grh_route_check(bool& route_checked,
 // 2^20.9), so those slices switched route and the relation set changed.  On the octic field of row
 // multiquadratic_p5_m7_m11 the unit ideal fails the check (about 2^23.4
 // against 2^8), and the order keeps the two-LLL route.
+// The checks every two-LLL result passes: a basis of the ideal's lattice
+// with a positive definite symmetric scaled Gram (as
+// rounded_embedding_data_has_contract), the Gram denominator 2^(p/2) of the
+// precision p it was built at, and a Gram that is LLL-reduced.
+bool two_lll_data_passes_checks(
+        const silex::detail::relation_search::IdealLatticeLllData& data,
+        const silex::Ideal& ideal, slong precision) noexcept {
+    if (!rounded_embedding_data_has_contract(data, ideal)) {
+        return false;
+    }
+    sflint::Fmpz denominator;
+    sflint::fmpz_one(sflint::FmpzRef(denominator));
+    sflint::fmpz_mul_2exp(sflint::FmpzRef(denominator),
+                          sflint::FmpzConstRef(denominator),
+                          static_cast<ulong>(precision / 2));
+    if (!sflint::fmpz_equal(sflint::FmpzConstRef(data.gram_denominator),
+                            sflint::FmpzConstRef(denominator))) {
+        return false;
+    }
+    sflint::FmpzLll config(0.99, 0.51, GRAM, APPROX);
+    return ::fmpz_lll_is_reduced(data.scaled_gram.raw(), config.raw(),
+                                 precision) != 0;
+}
+
+// Warm start of the two-LLL schedule.  In this field (the grh corpus row
+// cyclotomic_real_q10_c11_deg10) a two-LLL build requested at 200 bits
+// fails the rounding checks at 200 and succeeds at 400.  A cache keyed on
+// the order records 400, and the next build of another ideal starts there:
+// its result is exactly the cold build requested at 400, passes the checks
+// a cold build passes, and spans the same lattice as the cold build at 200.
+int test_two_lll_warm_start_matches_cold_build_at_warm_precision() {
+    namespace rs = silex::detail::relation_search;
+    constexpr std::array<slong, 11> q10_c11 = {
+            238831, -228566, -128567, 146666, -15113, -13352,
+            2746,   334,     -97,     -2,     1};
+    constexpr slong kRequestedPrecision = 200;
+    FieldSetup setup =
+            monic_field(q10_c11.data(), static_cast<slong>(q10_c11.size()));
+    const silex::Order& order = setup.maximal_order;
+    assert(order.degree() == 10);
+
+    std::vector<silex::Ideal> primes;
+    for (ulong p = 2; p < 1000 && primes.size() < 2; ++p) {
+        if (::n_is_prime(p) == 0) {
+            continue;
+        }
+        silex::Ideal prime(order);
+        assert(prime.is_defined());
+        if (degree_one_prime_ideal_above(prime, order, p)) {
+            primes.push_back(std::move(prime));
+        }
+    }
+    assert(primes.size() == 2);
+
+    rs::IdealLatticeRoundedEmbeddingCache cache;
+    rs::bind_ideal_lattice_rounded_embedding_cache(cache, order);
+    assert(cache.two_lll_warm_precision == 0);
+
+    // First ideal: a cold start through the cache, equal to the build
+    // without a cache, records the precision it succeeded at.
+    rs::IdealLatticeLllData first_cached;
+    rs::IdealLatticeLllData first_cold;
+    assert(rs::build_ideal_lattice_lll_data(first_cached, primes[0],
+                                            kRequestedPrecision, &cache));
+    assert(rs::build_ideal_lattice_lll_data(first_cold, primes[0],
+                                            kRequestedPrecision));
+    assert(same_lll_data(first_cached, first_cold));
+    assert(cache.two_lll_warm_precision == 2 * kRequestedPrecision);
+    assert(two_lll_data_passes_checks(first_cached, primes[0],
+                                      2 * kRequestedPrecision));
+
+    // Second ideal: warm-started at 400.
+    rs::IdealLatticeLllData warm;
+    rs::IdealLatticeLllData cold_at_warm;
+    rs::IdealLatticeLllData cold;
+    assert(rs::build_ideal_lattice_lll_data(warm, primes[1],
+                                            kRequestedPrecision, &cache));
+    assert(rs::build_ideal_lattice_lll_data(cold_at_warm, primes[1],
+                                            2 * kRequestedPrecision));
+    assert(rs::build_ideal_lattice_lll_data(cold, primes[1],
+                                            kRequestedPrecision));
+    assert(same_lll_data(warm, cold_at_warm));
+    assert(cache.two_lll_warm_precision == 2 * kRequestedPrecision);
+    const slong cold_precision =
+            2 * static_cast<slong>(::fmpz_bits(cold.gram_denominator.raw()) - 1);
+    assert(two_lll_data_passes_checks(warm, primes[1],
+                                      2 * kRequestedPrecision));
+    assert(two_lll_data_passes_checks(cold, primes[1], cold_precision));
+    sflint::FmpzMat warm_hnf(order.degree(), order.degree());
+    sflint::FmpzMat cold_hnf(order.degree(), order.degree());
+    ::fmpz_mat_hnf(warm_hnf.raw(), warm.basis.raw());
+    ::fmpz_mat_hnf(cold_hnf.raw(), cold.basis.raw());
+    assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(warm_hnf),
+                                  sflint::FmpzMatConstRef(cold_hnf)));
+
+    // A cache keyed on another order neither warm-starts nor records.
+    FieldSetup cubic = cubic_x3_minus_2();
+    silex::Ideal cubic_prime(cubic.maximal_order);
+    assert(cubic_prime.is_defined());
+    assert(degree_one_prime_ideal_above_five(cubic_prime,
+                                             cubic.maximal_order));
+    rs::IdealLatticeLllData other_cached;
+    rs::IdealLatticeLllData other_cold;
+    assert(rs::build_ideal_lattice_lll_data(other_cached, cubic_prime,
+                                            kRequestedPrecision, &cache));
+    assert(rs::build_ideal_lattice_lll_data(other_cold, cubic_prime,
+                                            kRequestedPrecision));
+    assert(same_lll_data(other_cached, other_cold));
+    assert(cache.two_lll_warm_precision == 2 * kRequestedPrecision);
+
+    // Rebinding the cache to another order clears the warm precision.
+    rs::bind_ideal_lattice_rounded_embedding_cache(cache,
+                                                   cubic.maximal_order);
+    assert(cache.two_lll_warm_precision == 0);
+    return 0;
+}
+
 int test_rounded_embedding_route_check_once_per_context() {
     constexpr std::array<slong, 16> real_31 = {
             -1, -8, 28, 84, -126, -252, 210, 330,
@@ -2489,6 +2610,8 @@ int main() {
     assert(test_rounded_embedding_route_check_for_badly_rounded_order() == 0);
     assert(test_rounded_embedding_route_check_boundary() == 0);
     assert(test_two_lll_order_gram_reuse_matches_recomputation() == 0);
+    assert(test_two_lll_warm_start_matches_cold_build_at_warm_precision() ==
+           0);
     assert(test_rounded_embedding_route_check_once_per_context() == 0);
     assert(test_rounded_embedding_certified_lll_matches_fmpz_lll() == 0);
     assert(test_two_lll_certified_lll_matches_fmpz_lll() == 0);

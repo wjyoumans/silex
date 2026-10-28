@@ -138,14 +138,16 @@ SearchAttempt search_ideal_for_witness(
         const Element& reduction_multiplier,
         flint::FmpzMatConstRef random_product_row,
         bool random_product,
-        const ClassGroupIdealRelationWitnessOptions& options) noexcept {
+        const ClassGroupIdealRelationWitnessOptions& options,
+        relation_search::IdealLatticeRoundedEmbeddingCache& lll_cache) noexcept {
     const Order* order = context.parent();
     const FactorBase* base = context.factor_base();
     const DiagnosticsContext* diagnostics = context.diagnostics();
     relation_search::IdealLatticeLllData t2_context;
     relation_search::OrderCoordinateElementConversion conversion;
     if (!relation_search::build_ideal_lattice_lll_data(
-                t2_context, search_ideal, options.reduction_precision) ||
+                t2_context, search_ideal, options.reduction_precision,
+                &lll_cache) ||
         !conversion.reset(*order)) {
         set_failure(result,
                     ClassGroupIdealRelationWitnessStatus::arithmetic_failure,
@@ -384,12 +386,19 @@ bool class_group_ideal_relation_continuation_witness(
         return false;
     }
 
+    // One cache for every search ideal of this witness (all in `order`), so
+    // the two-LLL builds after the first warm-start at the precision the
+    // last one reached.
+    relation_search::IdealLatticeRoundedEmbeddingCache lll_cache;
+    relation_search::bind_ideal_lattice_rounded_embedding_cache(lll_cache,
+                                                                *order);
     flint::FmpzMat random_product_row(1, base->length());
     flint::fmpz_mat_zero(flint::FmpzMatRef(random_product_row));
     SearchAttempt attempt = search_ideal_for_witness(
             result, multiplier, factor_base_row, context, original_ideal,
             reduced_ideal, reduction_multiplier,
-            flint::FmpzMatConstRef(random_product_row), false, options);
+            flint::FmpzMatConstRef(random_product_row), false, options,
+            lll_cache);
     if (attempt == SearchAttempt::success) {
         return true;
     }
@@ -427,7 +436,8 @@ bool class_group_ideal_relation_continuation_witness(
         attempt = search_ideal_for_witness(
                 result, multiplier, factor_base_row, context, original_ideal,
                 search_ideal, reduction_multiplier,
-                flint::FmpzMatConstRef(random_product_row), true, options);
+                flint::FmpzMatConstRef(random_product_row), true, options,
+                lll_cache);
         if (attempt == SearchAttempt::success) {
             return true;
         }

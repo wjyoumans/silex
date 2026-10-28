@@ -970,6 +970,16 @@ bool build_ideal_lattice_lll_data(
         return false;
     }
 
+    // Warm start: a cache keyed on this order starts the schedule at the
+    // precision its last successful build reached, skipping the attempts
+    // that failed for an earlier ideal of the order.
+    const bool order_cache = cache != nullptr && cache->has_order &&
+                             cache->order.has_same_data(*order);
+    if (order_cache && cache->two_lll_warm_precision > active_precision &&
+        cache->two_lll_warm_precision <= kIdealLatticeLllMaxPrecision) {
+        active_precision = cache->two_lll_warm_precision;
+    }
+
     IdealLatticePrecisionSchedule schedule(active_precision);
     while (schedule.active_precision() <= kIdealLatticeLllMaxPrecision) {
         active_precision = schedule.active_precision();
@@ -1005,6 +1015,9 @@ bool build_ideal_lattice_lll_data(
         out.basis = std::move(basis);
         out.scaled_gram = std::move(scaled_gram);
         out.gram_denominator = std::move(gram_denominator);
+        if (order_cache) {
+            cache->two_lll_warm_precision = active_precision;
+        }
         return true;
     }
 
@@ -1055,6 +1068,25 @@ static bool ideal_lattice_round_embedding_rows_full_rank(
     return false;
 }
 
+void bind_ideal_lattice_rounded_embedding_cache(
+        IdealLatticeRoundedEmbeddingCache& cache,
+        const Order& order) noexcept {
+    if (cache.has_order && cache.order.has_same_data(order)) {
+        return;
+    }
+    cache.order = order;
+    cache.has_order = true;
+    cache.has_rounded_rows = false;
+    cache.rounded_rows = flint::FmpzMat(0, 0);
+    cache.order_gram_requested_precision = 0;
+    cache.order_gram_precision = 0;
+    cache.order_gram = flint::FmpzMat(0, 0);
+    cache.route_checked = false;
+    cache.use_two_lll_route = false;
+    cache.two_lll_warm_precision = 0;
+    cache.two_lll_order_grams.clear();
+}
+
 // Fills the per-order cache: the order T2 Gram numerator follows the same
 // precision schedule as the order Gram of ideal_lattice_gram_lll_reduce, so
 // at a given starting precision both routes use the same order Gram.  The
@@ -1068,18 +1100,7 @@ static bool ideal_lattice_fill_rounded_embedding_cache(
     if (degree <= 0 || precision <= 0) {
         return false;
     }
-    if (!cache.has_order || !cache.order.has_same_data(order)) {
-        cache.order = order;
-        cache.has_order = true;
-        cache.has_rounded_rows = false;
-        cache.rounded_rows = flint::FmpzMat(0, 0);
-        cache.order_gram_requested_precision = 0;
-        cache.order_gram_precision = 0;
-        cache.order_gram = flint::FmpzMat(0, 0);
-        cache.route_checked = false;
-        cache.use_two_lll_route = false;
-        cache.two_lll_order_grams.clear();
-    }
+    bind_ideal_lattice_rounded_embedding_cache(cache, order);
     if (cache.has_rounded_rows &&
         cache.order_gram_requested_precision == precision) {
         return true;

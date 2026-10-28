@@ -44,6 +44,13 @@ struct IdealLatticeTwoLllOrderGram {
 // the order is reduced by build_ideal_lattice_lll_data.
 // `two_lll_order_grams` holds the order data of that two-LLL route (see
 // IdealLatticeTwoLllOrderGram), cleared with the rest when the order changes.
+// `two_lll_warm_precision` is the precision at which the last two-LLL build
+// of the order (build_ideal_lattice_lll_data) succeeded, 0 if none: later
+// builds of the order start their schedule there instead of at the lower
+// requested precision, skipping attempts that failed the rounding checks
+// for an earlier ideal.  Every result is still accepted by the same checks
+// at the precision it was built at; an ideal that would have passed at a
+// lower precision gets the (equally valid) reduced basis of the warm one.
 struct IdealLatticeRoundedEmbeddingCache {
     Order order;
     bool has_order = false;
@@ -54,8 +61,16 @@ struct IdealLatticeRoundedEmbeddingCache {
     flint::FmpzMat order_gram{0, 0};
     bool route_checked = false;
     bool use_two_lll_route = false;
+    slong two_lll_warm_precision = 0;
     std::vector<IdealLatticeTwoLllOrderGram> two_lll_order_grams;
 };
+
+// Keys `cache` on `order`: when the cache holds no order or another order's
+// data, every cached field is cleared and the order stored.  A cache already
+// keyed on `order` is left as is.
+void bind_ideal_lattice_rounded_embedding_cache(
+        IdealLatticeRoundedEmbeddingCache& cache,
+        const Order& order) noexcept;
 
 // Sets `out` to basis * gram * basis^T for a symmetric `gram`, computing
 // basis * gram with one matrix product and only the upper triangle of the
@@ -75,8 +90,11 @@ bool copy_ideal_basis_row_coordinates(flint::FmpzMat& out,
 // The two-LLL route (reference NfOrd/LLL.jl:_lll).  With a non-null `cache`
 // whose order is the ideal's, the order T2 Gram numerator of each attempt is
 // taken from `cache->two_lll_order_grams` instead of being recomputed; see
-// ideal_lattice_two_lll_order_gram.  The result is the same with or without
-// a cache.
+// ideal_lattice_two_lll_order_gram.  Such a cache also warm-starts the
+// precision schedule at `cache->two_lll_warm_precision` when that exceeds
+// the starting precision, and records the precision of a successful build
+// there.  The result equals that of a build without a cache started at the
+// same precision.
 bool build_ideal_lattice_lll_data(
         IdealLatticeLllData& out,
         const Ideal& ideal,
