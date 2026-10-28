@@ -224,19 +224,36 @@ namespace detail {
 bool OrderElementAccess::set_element_with_coordinates(
         OrderElement& out,
         const Element& element,
-        flint::FmpzMatConstRef coordinates) noexcept {
+        flint::FmpzMatConstRef coordinates,
+        const DiagnosticsContext* diagnostics) noexcept {
     if (!out.is_defined() || out.parent_.parent() == nullptr ||
         !element.has_parent(*out.parent_.parent()) ||
         !fmpz_mat_shape(coordinates, 1, out.parent_.degree())) {
         return false;
     }
 #if defined(SILEX_ENABLE_DEBUG_CHECKS) && SILEX_ENABLE_DEBUG_CHECKS
-    // Debug builds verify the caller's guarantee.
-    OrderElement expected(out.parent_);
-    if (!expected.set_coordinates(coordinates) ||
-        !expected.value_.equal(element)) {
-        return false;
+    // Debug-check builds verify the caller's guarantee when the order
+    // module's expensive checks are enabled at run time (the check is a full
+    // basis multiply), report a violation through the debug-check facade,
+    // and reject it.
+    if (debug_check_enabled(diagnostics, DiagnosticsModule::order,
+                            DebugLevel::expensive)) {
+        constexpr const char* kLabel =
+                "order_element.set_element_with_coordinates";
+        debug_check_about_to_run(diagnostics, DiagnosticsModule::order,
+                                 DebugLevel::expensive, __func__, kLabel);
+        OrderElement expected(out.parent_);
+        if (!expected.set_coordinates(coordinates) ||
+            !expected.value_.equal(element)) {
+            debug_check_failed(diagnostics, DiagnosticsModule::order,
+                               DebugLevel::expensive, __func__, __FILE__,
+                               __LINE__, kLabel,
+                               "coordinates * basis == element");
+            return false;
+        }
     }
+#else
+    (void)diagnostics;
 #endif
     if (!out.value_.set(element)) {
         return false;

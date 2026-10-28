@@ -617,7 +617,8 @@ bool factor_integral_data_over_base_by_residue_screen(
                                   set_element_with_coordinates(
                                           integral_alpha, *alpha,
                                           flint::FmpzMatConstRef(
-                                                  known_integral_coordinates))
+                                                  known_integral_coordinates),
+                                          diagnostics)
                         : !integral_alpha.set_coordinates(
                                   flint::FmpzMatConstRef(
                                           known_integral_coordinates))) {

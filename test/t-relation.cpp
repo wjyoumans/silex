@@ -5,6 +5,7 @@
 #include <silex/order_element.hpp>
 #include <silex/relation.hpp>
 
+#include "order_element/order_element_internal.hpp"
 #include "relation/relation_internal.hpp"
 #include "test_hook_access.hpp"
 #include "test_support.hpp"
@@ -1462,6 +1463,67 @@ int test_linear_root_residue_word_path_matches_fmpz() {
     return 0;
 }
 
+#if defined(SILEX_ENABLE_DEBUG_CHECKS) && SILEX_ENABLE_DEBUG_CHECKS
+void count_order_debug_failure(void* user,
+                               silex::DiagnosticsModule module,
+                               silex::DebugLevel,
+                               const char*,
+                               const char*,
+                               int,
+                               const char*,
+                               const char*) noexcept {
+    if (module == silex::DiagnosticsModule::order) {
+        ++*static_cast<int*>(user);
+    }
+}
+#endif
+
+// The internal copy of an element with its known coordinates rejects a wrong
+// shape or field; a debug-check build reports and rejects coordinates that
+// are not those of the element.
+int test_set_element_with_coordinates_contract() {
+    using OrderElementAccess = silex::detail::OrderElementAccess;
+    silex::NumberField field = quadratic_field(-5);
+    silex::Order order = silex::test::equation_order(field);
+    silex::Element three(field);
+    assert(three.set_si(3));
+    sflint::FmpzMat row(1, 2);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(row, 0, 0), 3);
+
+    silex::OrderElement out(order);
+    assert(OrderElementAccess::set_element_with_coordinates(
+            out, three, sflint::FmpzMatConstRef(row)));
+    assert(out.equal_si(3));
+
+    sflint::FmpzMat wrong_shape(1, 3);
+    assert(!OrderElementAccess::set_element_with_coordinates(
+            out, three, sflint::FmpzMatConstRef(wrong_shape)));
+    silex::NumberField other_field = cubic_field();
+    silex::Element other(other_field);
+    assert(other.set_si(3));
+    assert(!OrderElementAccess::set_element_with_coordinates(
+            out, other, sflint::FmpzMatConstRef(row)));
+
+#if defined(SILEX_ENABLE_DEBUG_CHECKS) && SILEX_ENABLE_DEBUG_CHECKS
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    int failures = 0;
+    silex::diagnostics_set_debug_checks(
+            diagnostics, silex::DebugLevel::expensive,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::order),
+            count_order_debug_failure, &failures);
+    sflint::FmpzMat mismatch(1, 2);
+    sflint::fmpz_set_si(sflint::fmpz_mat_entry(mismatch, 0, 0), 4);
+    assert(!OrderElementAccess::set_element_with_coordinates(
+            out, three, sflint::FmpzMatConstRef(mismatch), &diagnostics));
+    assert(failures == 1);
+    assert(OrderElementAccess::set_element_with_coordinates(
+            out, three, sflint::FmpzMatConstRef(row), &diagnostics));
+    assert(failures == 1);
+#endif
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -1484,5 +1546,6 @@ int main() {
     assert(test_cross_parent_copy_swap() == 0);
     assert(test_keeps_factor_base_alive() == 0);
     assert(test_linear_root_residue_word_path_matches_fmpz() == 0);
+    assert(test_set_element_with_coordinates_contract() == 0);
     return 0;
 }
