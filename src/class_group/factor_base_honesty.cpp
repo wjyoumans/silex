@@ -1382,6 +1382,9 @@ bool factor_base_honest_for_rational_prime(bool& honest,
             }
             continue;
         }
+        // After a forced miss (test seam above) the search actually succeeded,
+        // so the `exhaustion` logged and audited below is not a real
+        // exhaustion; tests must not read those fields as meaningful.
         log_unwitnessed_required_prime(
                 diagnostics, p, *prime, use_direct_required_prime_witness,
                 max_stage, effort, exhaustion);
