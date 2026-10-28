@@ -1062,6 +1062,14 @@ int test_take_publish_reuses_group_with_unchanged_basis() {
     assert(cache.compute_count == 1 && cache.reuse_count == 2);
     assert(group_matches_plain(group, six, basis));
 
+    // A failed publish after the inputs were taken (singular basis) also
+    // leaves the group as it was.
+    sflint::FmpzMat singular(3, 3);
+    set_entry_si(singular, 0, 0, 2);
+    set_entry_si(singular, 1, 1, 3);
+    assert(!take_copies(group, six, singular, cache));
+    assert(group_matches_plain(group, six, basis));
+
     // A changed basis is recomputed and cached.
     sflint::FmpzMat grown(7, 3);
     for (slong i = 0; i < 6; ++i) {
