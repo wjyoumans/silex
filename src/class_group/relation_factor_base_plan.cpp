@@ -1107,9 +1107,7 @@ bool specialize_maximal_imaginary_quadratic_factor_base_plan(
                 // keep the compact base and certify the class group by its
                 // structure (ClassGroupGenerationBasis::
                 // structure_certificate).
-                plan.imaginary_quadratic_structure_certificate =
-                        !QuadraticStructureCertificateTestSeams::
-                                compact_base_without_certificate();
+                plan.imaginary_quadratic_structure_certificate = true;
             } else {
                 plan.working_bound.swap(generation_bound);
             }

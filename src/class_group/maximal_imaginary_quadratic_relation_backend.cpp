@@ -27,7 +27,6 @@ namespace silex {
 namespace {
 
 constexpr ulong kQuadraticRelationPhase = UWORD(11);
-constexpr ulong kQuadraticHonestyPhase = UWORD(7);
 constexpr ulong kQuadraticRelationModulePrime = UWORD(27449);
 constexpr slong kQuadraticRandomExponentMax = 15;
 constexpr slong kQuadraticPrincipalReductionPrecision = 200;
@@ -1345,7 +1344,6 @@ ClassGroupContext::run_maximal_imaginary_quadratic_relation_backend_(
     }
 
     flint::Fmpz required_generation_bound;
-    bool compact_base_honest = true;
     if (!factor_base_class_group_bound(
                 flint::FmpzRef(required_generation_bound), order)) {
         return SpecializedRelationBackendStatus::failed;
@@ -1364,29 +1362,16 @@ ClassGroupContext::run_maximal_imaginary_quadratic_relation_backend_(
             compact_base_needs_honesty &&
             detail::ClassGroupCertificationAccess::
                     imaginary_quadratic_structure_certificate_planned(*this);
+    // A compact base without the structure-certificate plan has no
+    // generation proof here, so it fails closed.  No production plan
+    // produces one: this backend runs only in a `proven` class/unit
+    // transaction whose relation strategy is relation_completion_table, and
+    // the specialized plan of that transaction
+    // (specialize_maximal_imaginary_quadratic_factor_base_plan) either lifts
+    // its working bound to the generation bound or keeps the compact base
+    // and sets the structure-certificate switch.
     if (compact_base_needs_honesty && !structure_certificate_route) {
-        SILEX_PROFILE_SCOPE(
-                active_diagnostics, DiagnosticsModule::class_group,
-                "class_group.maximal_imaginary_quadratic_relations."
-                "factor_base_honesty");
-        const ulong honesty_seed =
-                detail::relation_search::relation_search_phase_seed(
-                        *this, base_.length(), kQuadraticHonestyPhase, 0);
-        if (!detail::relation_search::factor_base_honesty_check(
-                    compact_base_honest, base_, factor_base_bound,
-                    flint::FmpzConstRef(required_generation_bound), nullptr,
-                    honesty_seed, false,
-                    kQuadraticPrincipalReductionPrecision,
-                    // An unwitnessed prime falls back to the general
-                    // relation route, so keep the stage-0 caps here.
-                    detail::relation_search::factor_base_witness_escalation(
-                            true),
-                    active_diagnostics)) {
-            return SpecializedRelationBackendStatus::failed;
-        }
-        if (!compact_base_honest) {
-            return SpecializedRelationBackendStatus::unavailable;
-        }
+        return SpecializedRelationBackendStatus::failed;
     }
 
     if (exact_discriminant_minus_three) {
@@ -1686,17 +1671,14 @@ ClassGroupContext::run_maximal_imaginary_quadratic_relation_backend_(
                             "class_group."
                             "maximal_imaginary_quadratic_relations."
                             "checkpoint.generation");
+                    // Off the structure-certificate route the base
+                    // reaches the generation bound (a compact base failed
+                    // closed above).
                     generation_verified =
                             !structure_certificate_route &&
-                            (compact_base_needs_honesty
-                                     ? detail::ClassGroupCertificationAccess::
-                                               record_factor_base_honesty_proof(
-                                                       *this,
-                                                       flint::FmpzConstRef(
-                                                               required_generation_bound))
-                                     : check_factor_base_generation_bound(
-                                               flint::FmpzConstRef(
-                                                       required_generation_bound)));
+                            check_factor_base_generation_bound(
+                                    flint::FmpzConstRef(
+                                            required_generation_bound));
                 }
                 bool exact_presentation = false;
                 if (structure_certificate_route) {

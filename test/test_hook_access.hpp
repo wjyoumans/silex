@@ -226,17 +226,6 @@ public:
                 columns > 0 ? columns : 0, std::memory_order_relaxed);
     }
 
-    // With the column limit lowered, keeps the compact base without the
-    // structure-certificate switch (see QuadraticStructureCertificateTestSeams::
-    // compact_base_without_certificate), so the quadratic backend runs its
-    // factor-base honesty route.  False restores the default.
-    static void set_quadratic_compact_base_without_certificate(
-            bool enabled) noexcept {
-        QuadraticStructureCertificateTestSeams::
-                compact_base_without_certificate_.store(
-                        enabled, std::memory_order_relaxed);
-    }
-
     // Labels a set unit group proven without any check.  Tests use it to
     // build a proven-labelled group whose later rejection must come from the
     // class-group gate itself.  Does nothing for an unset group.

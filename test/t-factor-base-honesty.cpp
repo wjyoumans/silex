@@ -3373,8 +3373,8 @@ int test_direct_route_escalation_caps_and_counters() {
 // caller with no factor-base restart and no fallback: bounded escalation on
 // the T2 route.  The relation-search driver, with a factor-base restart
 // available, keeps the stage-0 reference flow: no escalation on the T2 route.
-// Both pass the capped T2 search; only the quadratic backend (not reached by
-// any cheap fixture) passes the lattice search.
+// Both pass the capped T2 search; no production caller passes the lattice
+// search.
 bool class_unit_honesty_call_counts(slong& direct_none,
                                     slong& direct_bounded,
                                     slong& lattice_total,
@@ -3786,11 +3786,12 @@ int test_routes_pass_intended_escalation_mode() {
     return 0;
 }
 
-// The imaginary quadratic backend's honesty route: a `proven` class group of
-// the maximal order of Q(sqrt(-4027)) computed from a compact base below the
-// generation bound runs one lattice scan with the stage-0 caps, and no T2
-// scan.
-int test_quadratic_backend_runs_honesty_route() {
+// The imaginary quadratic backend runs no honesty scan: a `proven` class
+// group of the maximal order of Q(sqrt(-4027)) reaches the generation bound
+// with the default plan, and with the column limit lowered the plan keeps
+// the compact base on the structure-certificate route.  A compact base
+// without that route fails closed in the backend, and no plan produces one.
+int test_quadratic_backend_runs_no_honesty_scan() {
     using Hook = silex::detail::TestHookAccess;
     slong direct_none = 0;
     slong direct_bounded = 0;
@@ -3802,24 +3803,16 @@ int test_quadratic_backend_runs_honesty_route() {
                 silex::test::equation_order(setup.field))) {
         return 1;
     }
-    // Default plan: the base reaches the generation bound, so no honesty
-    // scan runs at all.
     if (!class_unit_honesty_call_counts(direct_none, direct_bounded, lattice,
                                         setup, 3) ||
         direct_none + direct_bounded + lattice != 0) {
         return 2;
     }
-    // Compact base without the certificate switch: one lattice scan with the
-    // stage-0 caps, and no T2 scan.
     Hook::set_quadratic_structure_certificate_column_limit(1);
-    Hook::set_quadratic_compact_base_without_certificate(true);
     const bool ok = class_unit_honesty_call_counts(
             direct_none, direct_bounded, lattice, setup, 3);
-    Hook::set_quadratic_compact_base_without_certificate(false);
     Hook::set_quadratic_structure_certificate_column_limit(0);
-    return ok && lattice == 1 && direct_none == 0 && direct_bounded == 0
-            ? 0
-            : 3;
+    return ok && direct_none + direct_bounded + lattice == 0 ? 0 : 3;
 }
 
 // Lowering the T2 element-step cap makes a direct witness enumeration stop at
@@ -4309,7 +4302,7 @@ int test_t2_double_rows_fallbacks_match_arb_scan() {
 }
 
 int main() {
-    assert(test_quadratic_backend_runs_honesty_route() == 0);
+    assert(test_quadratic_backend_runs_no_honesty_scan() == 0);
     assert(test_element_step_cap_hits_observed() == 0);
     assert(test_scalar_noncontiguous_blocks() == 0);
     assert(test_scalar_witness_reference_cases() == 0);
