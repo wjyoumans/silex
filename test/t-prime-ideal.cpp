@@ -2690,8 +2690,9 @@ silex::Order maximal_order_of_pure_cubic(silex::NumberField& field,
 
 // Valuations at each prime of a cubic order, for elements e_i + e_j,
 // p (e_i + e_j) and p^3 (e_i + e_j) (so valuations 0 and positive both occur): the public
-// valuation and the anti-uniformizer route (word-size mod-p screen when p
-// fits a word) must agree with power containment.
+// valuation and the anti-uniformizer route (word-size screen modulo p^k when
+// p fits a word, with k = 1 when p is large) must agree with power
+// containment.
 void check_cubic_valuations(const silex::PrimeIdealList& primes,
                             const silex::Order& maximal,
                             const sflint::Fmpz& p) noexcept {
@@ -3725,7 +3726,8 @@ int test_coordinate_valuation_word_power_chunks() {
                                valuation_by_power_containment(
                                        base_value, *prime, u, 40));
                 assert(base_value < 40);
-                for (slong target : {k - 1, k, k + 1, 2 * k + 1}) {
+                for (slong target :
+                     {k - 1, k, k + 1, 2 * k - 1, 2 * k, 2 * k + 1}) {
                     // Smallest m with m e + v_P(u) >= target.
                     slong m = (target - base_value + e - 1) / e;
                     m = m < 0 ? 0 : m;
