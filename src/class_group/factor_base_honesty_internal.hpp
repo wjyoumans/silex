@@ -287,6 +287,14 @@ bool factor_base_honesty_quadratic_discriminant(
 // factor_base_principal_witness under the given predicate, and both treat a
 // null subfactor_base_schedule, or a schedule entry outside the base, as no
 // further twists rather than as a failed scan.
+//
+// The scalar/lattice search (use_direct_required_prime_witness == false) is
+// test/reference-only: every production caller passes true (the relation
+// search driver's kCappedRequiredPrimeWitnessSearch), and
+// t-factor-base-honesty.cpp checks through per-scan call counts that the
+// production routes make no lattice-search scan.  Tests keep it as the uncapped reference that the capped T2
+// search is compared against.  A new production caller must not pass false
+// without review: the lattice search has no candidate cap.
 bool factor_base_honesty_check(
         bool& honest,
         const FactorBase& base,

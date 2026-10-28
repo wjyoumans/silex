@@ -1356,6 +1356,8 @@ bool factor_base_honest_for_rational_prime(bool& honest,
                 witnessed =
                         result == RequiredPrimeWitnessSearchResult::found;
             } else {
+                // Test/reference-only scalar/lattice search; no production
+                // caller selects it (factor_base_honesty_internal.hpp).
                 witnessed =
                         factor_base_reduces_prime_by_principal_search(
                                 base, *prime, effort.radius,
