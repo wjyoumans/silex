@@ -3849,6 +3849,121 @@ int test_element_step_cap_hits_observed() {
     return hits[0] == 0 && hits[1] > 0 ? 0 : 4;
 }
 
+// The class/unit retries named by profile events: the rank-1 restart with
+// the relation-kernel surplus target and the end of that fallback.
+struct CandidateRetryCounter {
+    slong rank_one_surplus_restarts = 0;
+    slong rank_one_fallback_exhausted = 0;
+};
+
+void candidate_retry_callback(void* user,
+                              silex::DiagnosticsModule,
+                              silex::ProfileEvent event,
+                              const char*,
+                              const char* label) noexcept {
+    if (label == nullptr || event != silex::ProfileEvent::event) {
+        return;
+    }
+    CandidateRetryCounter& counter =
+            *static_cast<CandidateRetryCounter*>(user);
+    if (std::strcmp(label, "unit_group.candidate_retry."
+                           "restart_after_rank_one_surplus") == 0) {
+        ++counter.rank_one_surplus_restarts;
+    } else if (std::strcmp(label, "unit_group.candidate_retry."
+                                  "exhausted_rank_one_fallback") == 0) {
+        ++counter.rank_one_fallback_exhausted;
+    }
+}
+
+struct ForcedMissRun {
+    bool computed = false;
+    const char* reason = nullptr;
+    bool unwitnessed_recorded = false;
+    slong misses = 0;
+    slong direct_none = 0;
+    slong direct_bounded = 0;
+    CandidateRetryCounter retries;
+};
+
+// A `proven` class/unit transaction with the honesty witness search forced
+// to miss at its first `stages` stages (TestHookAccess).
+bool run_forced_miss_transaction(ForcedMissRun& run,
+                                 const FieldSetup& setup,
+                                 ulong bound,
+                                 slong stages) noexcept {
+    using Hook = silex::detail::TestHookAccess;
+    using E = search::FactorBaseWitnessEscalation;
+    run = ForcedMissRun{};
+    if (!setup.maximal_order.is_defined()) {
+        return false;
+    }
+    sflint::Fmpz factor_base_bound;
+    sflint::fmpz_set_ui(sflint::FmpzRef(factor_base_bound), bound);
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(silex::DiagnosticsModule::unit_group),
+            candidate_retry_callback, &run.retries);
+    silex::ClassGroupComputeOptions options;
+    options.zeta_bf_max_cutoff = 20000;
+    options.requested_certification = silex::CertificationMode::proven;
+    options.diagnostics = &diagnostics;
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    silex::detail::ClassUnitTransactionReport audit;
+    Hook::factor_base_honesty_call_counts_reset();
+    Hook::factor_base_honesty_forced_misses_reset();
+    Hook::set_factor_base_honesty_forced_miss_stages(stages);
+    run.computed = silex::detail::compute_class_unit_transaction(
+            units, class_group, setup.maximal_order,
+            sflint::FmpzConstRef(factor_base_bound), options, 128, audit);
+    Hook::set_factor_base_honesty_forced_miss_stages(0);
+    run.misses = Hook::factor_base_honesty_forced_misses();
+    run.direct_none = Hook::factor_base_honesty_call_count(true, E::none);
+    run.direct_bounded = Hook::factor_base_honesty_call_count(true, E::bounded);
+    run.reason = audit.failure_reason;
+    run.unwitnessed_recorded = audit.factor_base_honesty_failure.recorded;
+    return true;
+}
+
+// The failing-honesty routes of a `proven` class/unit transaction on
+// Z[x]/(x^3 - 15) (rank 1) at base bound 2, whose relation-production
+// prepass scans with bounded escalation and has no factor-base restart.  A
+// forced stage-0 miss is recovered by the first escalated stage.  A miss at
+// every stage fails the scan, so the transaction retries: each candidate
+// restart scans again, the rank-1 outer loop restarts once with the
+// relation-kernel surplus target and then exhausts that fallback, and the
+// transaction fails with factor_base_honesty_unwitnessed.
+int test_forced_honesty_miss_takes_rank_one_retry_path() {
+    const FieldSetup setup = maximal_order_setup({-15, 0, 0, 1});
+    ForcedMissRun recovered;
+    if (!run_forced_miss_transaction(recovered, setup, 2, 1) ||
+        !recovered.computed || recovered.misses != 1 ||
+        recovered.direct_bounded != 1 || recovered.direct_none != 0 ||
+        recovered.unwitnessed_recorded ||
+        recovered.retries.rank_one_surplus_restarts != 0) {
+        return 1;
+    }
+    const slong every_stage = search::kFactorBaseHonestyEscalationStages + 1;
+    ForcedMissRun failed;
+    if (!run_forced_miss_transaction(failed, setup, 2, every_stage) ||
+        failed.computed || failed.reason == nullptr ||
+        std::strcmp(failed.reason, "factor_base_honesty_unwitnessed") != 0 ||
+        !failed.unwitnessed_recorded || failed.direct_none != 0 ||
+        failed.direct_bounded < 2 ||
+        failed.misses < every_stage * failed.direct_bounded) {
+        return 2;
+    }
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    if (failed.retries.rank_one_surplus_restarts != 1 ||
+        failed.retries.rank_one_fallback_exhausted != 1) {
+        return 3;
+    }
+#endif
+    return 0;
+}
+
 // The T2 double-row setup (T2EnumerationGram::double_rows) against the Arb
 // setup on one ideal, both without an embedding cache so both start at the
 // first rounding scale.  When the double route keeps its data, its basis is
@@ -4304,6 +4419,7 @@ int test_t2_double_rows_fallbacks_match_arb_scan() {
 int main() {
     assert(test_quadratic_backend_runs_no_honesty_scan() == 0);
     assert(test_element_step_cap_hits_observed() == 0);
+    assert(test_forced_honesty_miss_takes_rank_one_retry_path() == 0);
     assert(test_scalar_noncontiguous_blocks() == 0);
     assert(test_scalar_witness_reference_cases() == 0);
     assert(test_selected_witness_edge_cases() == 0);

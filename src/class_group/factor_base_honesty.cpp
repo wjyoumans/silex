@@ -1366,6 +1366,11 @@ bool factor_base_honest_for_rational_prime(bool& honest,
                                 effort.radius, effort.random_tries,
                                 random_state, predicate, diagnostics);
             }
+            if (witnessed &&
+                stage < FactorBaseHonestyForcedMissSeams::stages()) {
+                FactorBaseHonestyForcedMissSeams::record_miss();
+                witnessed = false;
+            }
         }
         if (audit != nullptr && effort.stage > audit->max_search_stage) {
             audit->max_search_stage = effort.stage;

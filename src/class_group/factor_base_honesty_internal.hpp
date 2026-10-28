@@ -115,6 +115,33 @@ private:
     inline static std::atomic<slong> hits_{0};
 };
 
+// Test-only seam that forces the honesty witness search to miss, so a test
+// can reach the routes taken when a required prime has no witness (a
+// factor-base restart, bounded escalation, or the failed route and the
+// class/unit retries after it) on a field whose primes all have witnesses.
+// A positive `stages` discards the witness found at every search stage below
+// it: 1 forces a stage-0 miss, and a value above
+// kFactorBaseHonestyEscalationStages misses at every stage.  The search
+// still runs and stops at its first witness, so a forced stage costs what a
+// passing stage costs, not an exhausted search.  `misses` counts the
+// discarded witnesses.  Zero stages means off.  Only detail::TestHookAccess
+// sets or reads them; production code reads the stage count and increments
+// the counter with relaxed atomics.
+class FactorBaseHonestyForcedMissSeams {
+public:
+    static slong stages() noexcept {
+        return stages_.load(std::memory_order_relaxed);
+    }
+    static void record_miss() noexcept {
+        misses_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+private:
+    friend class detail::TestHookAccess;
+    inline static std::atomic<slong> stages_{0};
+    inline static std::atomic<slong> misses_{0};
+};
+
 // Under bounded escalation, when a required prime has no witness at the
 // stage-0 caps, the witness search effort for that prime (lattice radius,
 // twists, random tries, and the T2 factor-attempt and element-step caps)

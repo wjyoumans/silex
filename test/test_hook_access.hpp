@@ -673,6 +673,25 @@ public:
                 std::memory_order_relaxed);
     }
 
+    // Test-only forced misses of the factor-base honesty witness search (see
+    // relation_search::FactorBaseHonestyForcedMissSeams): a positive
+    // `stages` discards the witness found at each search stage below it (1
+    // forces a stage-0 miss), zero restores the default; the miss counter
+    // counts the discarded witnesses.
+    static void set_factor_base_honesty_forced_miss_stages(
+            slong stages) noexcept {
+        relation_search::FactorBaseHonestyForcedMissSeams::stages_.store(
+                stages > 0 ? stages : 0, std::memory_order_relaxed);
+    }
+    static void factor_base_honesty_forced_misses_reset() noexcept {
+        relation_search::FactorBaseHonestyForcedMissSeams::misses_.store(
+                0, std::memory_order_relaxed);
+    }
+    static slong factor_base_honesty_forced_misses() noexcept {
+        return relation_search::FactorBaseHonestyForcedMissSeams::misses_.load(
+                std::memory_order_relaxed);
+    }
+
     // Test-only mode of the T2 double-row setup (see
     // relation_search::T2DoubleRowsTestSeams); `off` restores production.
     static void set_t2_double_rows_mode(
