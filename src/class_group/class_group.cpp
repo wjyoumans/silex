@@ -74,22 +74,33 @@ bool relation_saturation_torsion_needed(bool& out,
 
 namespace {
 
-// Largest bit length of |D| at which the exact class number h(D) of an
-// imaginary quadratic maximal order is counted from the reduced forms of
-// discriminant D: |D| < 2^44.  For fundamental D the reduced forms are
-// counted without being built
+// Largest bit lengths of |D| at which the exact class number h(D) of an
+// imaginary quadratic order (the proven route, that is the
+// imaginary_quadratic_class_number switch) is taken from the reduced forms of
+// discriminant D; above them h(D) comes from Dirichlet's class number formula
+// with a rigorous L(1, chi_D) enclosure
+// (imaginary_quadratic_class_number_analytic below).
+//
+// For fundamental D, which is every discriminant of a maximal order, the
+// reduced forms are counted without being built
 // (imaginary_quadratic_fundamental_reduced_form_count, time growing like
-// sqrt|D| and memory about 5 bytes per a <= sqrt(|D| / 3)); otherwise FLINT
-// qfb_reduced_forms lists them (time and memory growing like sqrt|D|).  This
-// cutoff governs the proven route, that is the
-// imaginary_quadratic_class_number switch.  At and above 2^44 the reduced
-// forms are not counted there: h(D) comes from Dirichlet's class number
-// formula with a rigorous L(1, chi_D) enclosure
-// (imaginary_quadratic_class_number_analytic below).  Below 2^44 the
-// listing was faster than that formula: measured per decade over |D| from
-// 1e7 to 1e14 in docs/development/class_number_route_cutoff.rst, before the
-// count replaced the listing for fundamental D; the cutoff is unchanged.  A
-// grh class/unit request has its own, lower cutoff, defined below.
+// sqrt|D| and memory about 5 bytes per a <= sqrt(|D| / 3)) for |D| < 2^54.
+// Measured with the route forced, the count costs 4.8 to 6.5 times fewer
+// instructions than the formula on the whole proven class/unit computation
+// at every |D| from 1e14 to 1e17, with identical outputs; its peak memory
+// grows like sqrt|D| (about 300 MB at 1e16, 900 MB at 1e17, against about
+// 40 MB for the formula).  The cutoff 2^54 keeps the count's peak, about
+// 390 MB just below it, under the 460 MB that FLINT's listing reaches below
+// the listing cutoff.  See docs/development/class_number_route_cutoff.rst.
+constexpr ulong imaginary_quadratic_count_max_abs_discriminant_bits = 54;
+
+// A non-fundamental D, which no maximal order has, keeps FLINT
+// qfb_reduced_forms for |D| < 2^44 (time and memory growing like sqrt|D|,
+// about 460 MB just below 2^44 and 1.4 GB at 1e14); there the listing was
+// faster than the formula, measured per decade over |D| from 1e7 to 1e14 in
+// docs/development/class_number_route_cutoff.rst before the count replaced
+// the listing for fundamental D.  A grh class/unit request has its own,
+// lower cutoff, defined below.
 constexpr ulong imaginary_quadratic_listing_max_abs_discriminant_bits = 44;
 
 // Accuracy of the first step of the analytic class number ladder below:
@@ -242,17 +253,18 @@ bool imaginary_quadratic_class_number(flint::FmpzRef out,
         !flint::fmpz_fits_si(discriminant)) {
         return false;
     }
-    // From 2^44 on, Dirichlet's formula instead of the listing, whose
-    // memory (about 1.4 GB at |D| = 1e14) can exhaust the process, and FLINT
-    // aborts on a failed allocation.
-    if (::fmpz_bits(discriminant.raw()) >
-        imaginary_quadratic_listing_max_abs_discriminant_bits) {
+    // From 2^54 on, Dirichlet's formula instead of the reduced forms, whose
+    // memory grows like sqrt|D| and can exhaust the process; FLINT and the
+    // count abort on a failed allocation.
+    const ulong bits = ::fmpz_bits(discriminant.raw());
+    if (bits > imaginary_quadratic_count_max_abs_discriminant_bits) {
         return imaginary_quadratic_class_number_analytic(out, discriminant);
     }
 
     // For fundamental D, h(D) is the number of reduced forms, counted without
     // building them; reduced_form_count_internal.hpp states the source
-    // chain.  A non-fundamental D keeps FLINT's listing.
+    // chain.  A non-fundamental D keeps FLINT's listing below 2^44 and the
+    // formula from 2^44 on.
     const ulong abs_discriminant =
             static_cast<ulong>(-flint::fmpz_get_si(discriminant));
     if (imaginary_quadratic_discriminant_is_fundamental(abs_discriminant)) {
@@ -264,6 +276,9 @@ bool imaginary_quadratic_class_number(flint::FmpzRef out,
         }
         flint::fmpz_set_ui(out, count);
         return true;
+    }
+    if (bits > imaginary_quadratic_listing_max_abs_discriminant_bits) {
+        return imaginary_quadratic_class_number_analytic(out, discriminant);
     }
 
     struct ReducedForms {
@@ -6720,8 +6735,8 @@ namespace {
 // Bit length of |D| from which a grh imaginary-quadratic request takes h
 // from the GRH relation lattice instead of the exact class number h(D):
 // bit length >= 35, i.e. |D| >= 2^34.  Below it h(D) is counted from the
-// reduced forms.  This is independent of the cutoff 2^44 of the proven
-// class number route (imaginary_quadratic_listing_max_abs_discriminant_bits).
+// reduced forms.  This is independent of the cutoff 2^54 of the proven
+// class number route (imaginary_quadratic_count_max_abs_discriminant_bits).
 // On the lattice route the index-one test of a grh request uses a
 // Belabas-Friedman hR, and the completeness basis is belabas_friedman for
 // every field on it.  Measured on an idle

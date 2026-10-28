@@ -14,11 +14,12 @@ number from one of two routes, chosen by the bit length of the discriminant
 
 The cutoff was ``2^44`` before it was lowered to ``2^34`` (see "Lowering the
 cutoff to 2^34" below).  The exact class number ``h(D)`` that ``proven``
-requests use has its own cutoff, unchanged at ``2^44``
-(``imaginary_quadratic_listing_max_abs_discriminant_bits``): below it ``h(D)``
-is counted from the reduced forms, and from ``2^44`` on it comes from the class
-number formula with a rigorous ``L(1, chi_D)`` enclosure (see "Class groups
-and order units" in :doc:`../reference/algorithms_and_sources`).
+requests use has its own cutoff, ``2^54``
+(``imaginary_quadratic_count_max_abs_discriminant_bits``, raised from ``2^44``;
+see "Raising the proven cutoff to 2^54" below): below it ``h(D)`` is counted
+from the reduced forms, and from ``2^54`` on it comes from the class number
+formula with a rigorous ``L(1, chi_D)`` enclosure (see "Class groups and order
+units" in :doc:`../reference/algorithms_and_sources`).
 
 Counting instead of listing
 ---------------------------
@@ -36,8 +37,8 @@ longer applies, and it is faster: on ``imaginary_quadratic_d10000000799``
 (``|D|`` about ``2^33.2``) callgrind counts 298.9M instructions for ``h(D)``
 by listing and 39.3M by counting.  The time comparisons below, against the
 class number formula and against the GRH relation lattice, were taken with
-the listing.  Both cutoffs stand unchanged until they are re-measured with
-the count.
+the listing.  The ``grh`` cutoff stands unchanged; the ``proven`` cutoff was
+re-measured with the count and raised (last section).
 
 The 2^44 cutoff was set by a first measurement (a busy machine; the lattice
 route's index-one test then used a different ``hR`` below ``2^44``) and was
@@ -310,3 +311,99 @@ at every field measured.  A test pins the route and the completeness basis at
 (``test_imaginary_quadratic_grh_refine_uses_exact_index`` and
 ``test_imaginary_quadratic_grh_lowered_cutoff_boundary`` in
 ``test/t-class-unit-matrix.cpp``).
+
+Raising the proven cutoff to 2^54
+---------------------------------
+
+With the count in place of the listing, the ``proven`` cutoff was
+re-measured by forcing each route in copies of a profile-release build (the
+compare immediate of the cutoff patched to 0 for the formula at every
+``|D|`` and to 127 for the count at every ``|D|``), on ``x^2 - x + c`` with
+``D = 1 - 4c`` fundamental.  The instruction counts are ``perf stat -e
+instructions:u`` of the whole ``silex-class-unit-instance --mode proven``
+process (at ``|D| = 1e14 + 319`` they agree with callgrind of the class/unit
+computation within 1%), and the peak memory is the process's maximum
+resident set.  The machine was busy, so the wall times are indicative only.
+Both routes gave the same full output (the instance JSON without timings) and
+exit code on every row:
+
+.. list-table::
+   :header-rows: 1
+
+   * - ``|D|``
+     - bits
+     - count: instructions
+     - formula: instructions
+     - ratio
+     - peak memory, count / formula
+   * - 100000000000319
+     - 47
+     - 55.7G
+     - 362.8G
+     - 6.5
+     - 49 / 38 MB
+   * - 100000000000015
+     - 47
+     - 59.9G
+     - 315.0G
+     - 5.3
+     - 49 / 38 MB
+   * - 1000000000000003
+     - 50
+     - 223.5G
+     - 1293.8G
+     - 5.8
+     - 109 / 40 MB
+   * - 1000000000000023
+     - 50
+     - 188.8G
+     - 901.9G
+     - 4.8
+     - 108 / 38 MB
+   * - 10000000000000003
+     - 54
+     - 734.9G
+     - 4055.8G
+     - 5.5
+     - 297 / 40 MB
+   * - 10000000000000023
+     - 54
+     - 609.7G
+     - 3184.4G
+     - 5.2
+     - 297 / 40 MB
+   * - 100000000000000003
+     - 57
+     - 2871.1G
+     - 15584.6G
+     - 5.4
+     - 893 / 40 MB
+
+The count is 4.8 to 6.5 times cheaper at every size measured, with no sign
+of a crossover up to ``1e17``, so time does not bound the cutoff in this
+range; memory does.  The count's peak grows like ``sqrt(|D|)`` (about 5 bytes
+per ``a <= sqrt(|D| / 3)``, roughly three times per decade) while the
+formula stays near 40 MB, and FLINT and the count abort on a failed
+allocation.  The cutoff ``2^54`` keeps the count's peak under the peak of
+the listing that the same function already allows below its own cutoff:
+FLINT ``qfb_reduced_forms`` on the non-fundamental ``D = -(2^44 - 4)`` peaks
+at 461 MB, and the whole ``proven`` computation on
+``D = -18014398509481979``, the largest fundamental ``D = 1 mod 4`` below
+``2^54``, peaks at 391 MB with the count.  ``2^57`` would have
+been the edge of the measured range, at about 1.1 GB.
+
+The listing cutoff of a non-fundamental ``D`` stays at ``2^44``
+(``imaginary_quadratic_listing_max_abs_discriminant_bits``).  No maximal
+order has a non-fundamental discriminant, so no class/unit computation
+reaches it; such a ``D`` is listed below ``2^44`` and passed to the formula
+from ``2^44`` on, as before.  The formula's contract is a fundamental ``D``,
+and it gives no ``h(D)`` for ``D = -(2^44 + 23)`` (conductor 3), so the call
+fails closed there, as before; the slow test below checks this.
+
+On ``imaginary_quadratic_d100000000000319`` (``proven``), callgrind counts
+363.19G Ir of ``compute_class_unit_transaction`` before the change and 55.29G
+after it (-84.8%), and the full output is unchanged on that row, on
+``|D| = 18000000000003`` (45 bits) and on ``D = -18014398509481979``.  The
+slow test ``t-zeta-quadratic-l1`` (``SILEX_TEST_SLOW``) checks that the count
+and the formula give the same ``h(D)`` at ``D = -(2^44 + 3)`` and
+``D = -(2^50 + 3)``.

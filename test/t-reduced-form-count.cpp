@@ -90,8 +90,10 @@ void check_against_listing() noexcept {
 }
 
 // Fixed rows: the count, and the class number through the shipped switch.
-// h(-17592186044415) is the largest fundamental |D| row below the 2^44
-// cutoff checked here.
+// h(-17592186044415) is the largest fundamental |D| row below the listing
+// cutoff 2^44, and D = -(2^44 + 3) is counted above it (the count cutoff is
+// 2^54); h(-(2^44 + 3)) = 1148064 is taken from an independent class-number
+// computation.
 void check_fixed_rows() noexcept {
     struct Row {
         slong discriminant;
@@ -104,6 +106,7 @@ void check_fixed_rows() noexcept {
             {-10000000799L, 202707},
             {-1000000000271L, 1499213},
             {-17592186044415L, 3384192},
+            {-17592186044419L, 1148064},
     };
     for (const Row& row : rows) {
         const ulong n = static_cast<ulong>(-row.discriminant);
@@ -120,7 +123,18 @@ void check_fixed_rows() noexcept {
 }
 
 // A non-fundamental D is refused by the count and takes FLINT's listing.
+// Above the listing cutoff 2^44 the count also refuses it, so the switch
+// passes it to the class number formula, which gives no h(D) for it (the
+// slow test t-zeta-quadratic-l1): D = -(2^44 + 23) = -3^2 * 59 * 4457 *
+// 7433317.
 void check_non_fundamental_fallback() noexcept {
+    {
+        ulong count = 0;
+        check(!detail::imaginary_quadratic_fundamental_reduced_form_count(
+                      count, UWORD(17592186044439)),
+              "count refuses a non-fundamental D above 2^44",
+              -17592186044439L);
+    }
     for (const slong d : {-12L, -16L, -40000000012L}) {
         const ulong n = static_cast<ulong>(-d);
         ulong count = 0;

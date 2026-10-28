@@ -133,6 +133,29 @@ Added
 Changed
 -------
 
+- ``proven`` class/unit computations on an imaginary quadratic field with
+  ``2^44 <= |D| < 2^54`` count the reduced forms of the fundamental
+  discriminant ``D`` for the exact class number ``h(D)``, as below ``2^44``,
+  instead of taking it from the class number formula (the cutoff
+  ``imaginary_quadratic_count_max_abs_discriminant_bits`` moves from ``2^44``
+  to ``2^54``).  With the routes forced, the count costs 4.8 to 6.5 times
+  fewer instructions than the formula on the whole computation at every
+  ``|D|`` measured from ``1e14`` to ``1e17``.  Its memory grows like
+  ``sqrt(|D|)`` while the formula's stays near 40 MB: the peak resident set
+  is 49 MB at ``|D| = 1e14`` and 391 MB at
+  ``D = -18014398509481979``, just below the new cutoff; ``2^54`` keeps it
+  under the 461 MB that FLINT's listing of a non-fundamental ``D`` reaches
+  below ``2^44``.  Outputs (the full instance JSON without timings) and
+  labels are unchanged on ``imaginary_quadratic_d100000000000319``, on
+  ``|D| = 18000000000003`` and on ``D = -18014398509481979``, and the count
+  and the formula agree at ``D = -(2^44 + 3)`` and ``D = -(2^50 + 3)``.
+  Callgrind Ir of the class/unit computation of
+  ``imaginary_quadratic_d100000000000319`` (``proven``) drops by 84.8% (363.19G to 55.29G).
+  A non-fundamental ``D``, which no maximal order has, keeps the listing
+  below ``2^44`` and the formula from ``2^44`` on, which fails closed for it
+  as before.  See
+  :doc:`../development/class_number_route_cutoff`.
+
 - The saturation proof scans (the stable scan and the proof-prime
   selectors) update the ``ell``-character kernel when a column is appended,
   intersecting the previous kernel with the new character as Hecke

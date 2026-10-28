@@ -69,9 +69,10 @@ inline ClassGroupRelationOptions class_group_relation_options(
 
 // The class number h(D) of the imaginary quadratic maximal order of
 // fundamental discriminant D < 0 with |D| < 2^63: counted from the reduced
-// forms for |D| < 2^44, from Dirichlet's class number formula with a
+// forms for |D| < 2^54, from Dirichlet's class number formula with a
 // rigorous L(1, chi_D) enclosure (imaginary_quadratic_class_number_analytic)
-// above.  Returns false, leaving `out` unspecified, if neither gives h(D).
+// above.  A non-fundamental D is listed by FLINT qfb_reduced_forms below
+// 2^44 and passed to the formula from 2^44 on.  Returns false, leaving `out` unspecified, if neither gives h(D).
 bool imaginary_quadratic_class_number(
         flint::FmpzRef out,
         flint::FmpzConstRef discriminant) noexcept;

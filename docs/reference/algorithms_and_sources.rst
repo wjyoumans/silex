@@ -2140,7 +2140,7 @@ precision where Silex fails.
 The exact imaginary-quadratic ``proven`` route uses the same index argument
 with the exact class number ``h = h(D)`` in place of ``ell``-local tests.
 Here ``D`` is the fundamental discriminant of the maximal order (the route
-applies to maximal orders only).  For ``|D| < 2^44`` ``h(D)`` is the number
+applies to maximal orders only).  For ``|D| < 2^54`` ``h(D)`` is the number
 of reduced forms of discriminant ``D`` (Cohen, GTM 138, Proposition 5.3.3);
 every form of a fundamental discriminant is primitive (Cohen, pp. 225 and
 232), so no primitivity test is needed.  Silex counts the reduced forms
@@ -2170,13 +2170,18 @@ without building them, in ``src/class_group/reduced_form_count.cpp``:
 FLINT is called only as a library; no FLINT code is ported.  FLINT 3.6.0
 ``qfb_reduced_forms`` (``qfb/reduced_forms.c``), which lists the forms, is
 the test oracle: the count equals its number of forms on every fundamental
-``|D| <= 2e5`` and on fixed rows up to ``|D| = 2^44 - 1``.  The sum also
+``|D| <= 2e5`` and on fixed rows up to ``|D| = 2^44 - 1``.  Above that, a
+fixed row at ``|D| = 2^44 + 3`` checks it against an independent value, and
+slow tests at ``|D| = 2^44 + 3`` and ``2^50 + 3`` against the class number
+formula below.  The sum also
 counts imprimitive forms when ``D`` is not fundamental, so the count is
 gated on ``D`` being fundamental (``D = 1 mod 4`` with ``|D|`` squarefree, or
 ``D = 4m`` with ``m = 2, 3 mod 4`` squarefree; Cohen, GTM 138, Definition 5.1.2); any other ``D`` keeps
-the listing of ``qfb_reduced_forms``, which returns the primitive forms.  The
-count needs about 5 bytes per ``a <= sqrt(|D| / 3)`` and time growing like
-``sqrt(|D|)``.  For ``|D| >= 2^44``
+the listing of ``qfb_reduced_forms``, which returns the primitive forms, for
+``|D| < 2^44``.  The count needs about 5 bytes per ``a <= sqrt(|D| / 3)``
+(about 390 MB just below ``2^54``) and time growing like ``sqrt(|D|)``; the
+cutoff ``2^54`` bounds that memory (see
+:doc:`../development/class_number_route_cutoff`).  For ``|D| >= 2^54``
 ``h(D)`` comes instead from Dirichlet's class number formula
 ``h(D) = w sqrt(|D|) L(1, chi_D) / (2 pi)``, with ``w = 2`` for ``D < -4``
 (Davenport, *Multiplicative Number Theory*, 3rd ed., Chapter 6), evaluated

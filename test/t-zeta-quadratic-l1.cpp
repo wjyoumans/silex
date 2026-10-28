@@ -663,22 +663,51 @@ void check_analytic_class_number() {
     }
 }
 
-// Above |D| = 2^44 the exact class number comes from the class number
-// formula, not from listing reduced forms.  D = -(2^44 + 3) = -7 * 37 * 937
-// * 72490393 is fundamental with h(D) = 1148064, taken from an independent
-// class-number computation.
-void check_class_number_above_listing_cutoff() {
-    const auto start = std::chrono::steady_clock::now();
+// h(D) through the shipped switch (imaginary_quadratic_class_number) and
+// from the class number formula directly, both equal to `expected`, and the
+// time of each.
+void check_class_number_routes_agree(slong d, ulong expected) {
     sflint::Fmpz discriminant;
-    sflint::fmpz_set_si(sflint::FmpzRef(discriminant), -17592186044419L);
-    sflint::Fmpz h;
+    sflint::fmpz_set_si(sflint::FmpzRef(discriminant), d);
+    const auto start = std::chrono::steady_clock::now();
+    sflint::Fmpz switched;
     assert(silex::detail::imaginary_quadratic_class_number(
+            sflint::FmpzRef(switched), sflint::FmpzConstRef(discriminant)));
+    const auto middle = std::chrono::steady_clock::now();
+    sflint::Fmpz analytic;
+    assert(silex::detail::imaginary_quadratic_class_number_analytic(
+            sflint::FmpzRef(analytic), sflint::FmpzConstRef(discriminant)));
+    const auto end = std::chrono::steady_clock::now();
+    assert(::fmpz_equal_ui(switched.raw(), expected) != 0);
+    assert(::fmpz_equal(switched.raw(), analytic.raw()) != 0);
+    std::printf("h(D) for D = %ld: switch %.2f s, formula %.2f s\n",
+                static_cast<long>(d),
+                std::chrono::duration<double>(middle - start).count(),
+                std::chrono::duration<double>(end - middle).count());
+    std::fflush(stdout);
+}
+
+// Between the listing cutoff 2^44 and the count cutoff 2^54 the switch
+// counts the reduced forms of a fundamental D, and the class number formula
+// gives the same h(D).  D = -(2^44 + 3) = -7 * 37 * 937 * 72490393 has
+// h(D) = 1148064, and D = -(2^50 + 3) = -7 * 3435997 * 46811113 has
+// h(D) = 3622540, both taken from an independent class-number computation.
+//
+// D = -(2^44 + 23) = -3^2 * 59 * 4457 * 7433317 is not fundamental (the
+// discriminant of the order of conductor 3 in Q(sqrt(-1954687338271)), which
+// is not a maximal order, so no class/unit computation asks for it).  The
+// count refuses it and the listing stops at 2^44, so the switch passes it to
+// the formula, whose contract is a fundamental D; it gives no h(D) and the
+// switch fails closed, as before the count cutoff was raised.
+void check_class_number_above_listing_cutoff() {
+    check_class_number_routes_agree(-17592186044419L, 1148064);
+    check_class_number_routes_agree(-1125899906842627L, 3622540);
+
+    sflint::Fmpz discriminant;
+    sflint::fmpz_set_si(sflint::FmpzRef(discriminant), -17592186044439L);
+    sflint::Fmpz h;
+    assert(!silex::detail::imaginary_quadratic_class_number(
             sflint::FmpzRef(h), sflint::FmpzConstRef(discriminant)));
-    assert(::fmpz_equal_ui(h.raw(), 1148064) != 0);
-    const double seconds = std::chrono::duration<double>(
-                                   std::chrono::steady_clock::now() - start)
-                                   .count();
-    std::printf("h(D) for D = -17592186044419: %.2f s\n", seconds);
 }
 
 
