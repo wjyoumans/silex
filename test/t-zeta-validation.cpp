@@ -907,14 +907,69 @@ bool check_grh_transaction_records_index_one_audit(
                    0;
 }
 
+// Counts the begin events of two profiling scopes of the grh index bound:
+// the refined value and the default hR.
+struct IndexBoundScopeCounts {
+    slong refined = 0;
+    slong fallback = 0;
+};
+
+void count_index_bound_scopes(void* user,
+                              silex::DiagnosticsModule,
+                              silex::ProfileEvent event,
+                              const char*,
+                              const char* label) noexcept {
+    IndexBoundScopeCounts* counts = static_cast<IndexBoundScopeCounts*>(user);
+    if (event != silex::ProfileEvent::begin_scope || label == nullptr) {
+        return;
+    }
+    if (std::strcmp(label,
+                    "unit_group.validation_analytic_index_bound."
+                    "ensure_refined_product") == 0) {
+        ++counts->refined;
+    } else if (std::strcmp(label,
+                           "unit_group.validation_analytic_index_bound."
+                           "ensure_product") == 0) {
+        ++counts->fallback;
+    }
+}
+
+// Runs a grh transaction on `setup` with the native options, counting the
+// refined and default index-bound scopes when profiling is compiled in.
+bool run_grh_transaction_counting_index_bound_scopes(
+        silex::ClassGroupContext& class_group,
+        IndexBoundScopeCounts& counts,
+        const FieldSetup& setup) noexcept {
+    silex::ClassGroupComputeOptions options;
+    sflint::Fmpz factor_base_bound;
+    if (!configure_native_options(options, factor_base_bound,
+                                  setup.maximal_order)) {
+        return false;
+    }
+    options.requested_certification = silex::CertificationMode::grh;
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(
+                    silex::DiagnosticsModule::unit_group),
+            count_index_bound_scopes, &counts);
+    options.diagnostics = &diagnostics;
+    silex::OrderUnitGroup units;
+    silex::detail::ClassUnitTransactionReport report;
+    return silex::detail::compute_class_unit_transaction(
+            units, class_group, setup.maximal_order,
+            sflint::FmpzConstRef(factor_base_bound), options, 128, report);
+}
+
 // The cubic field x^3 + x + 200 has a coarse cutoff of 882 but a candidate
-// index bound above one at the first test.  The first index bound is
-// decided by the refined value (or the default one), and the final test on
-// the accepted pair shows index one from the coarse value, so the
-// transaction records the coarse audit (cutoff 882).  Before the progressive
-// refined step the default value was cached by the first test and its audit
-// (the default cutoff) was recorded instead.
-bool check_grh_transaction_refines_to_default_audit(
+// index bound above one at the first test.  The refined value decides that
+// bound (the default hR is never computed), and the final test on the
+// accepted pair shows index one from the coarse value, so the transaction
+// records the coarse audit (cutoff 882).  Before the progressive refined
+// step the default value was cached by the first test and its audit (the
+// default cutoff) was recorded instead.
+bool check_grh_transaction_records_coarse_audit_after_refined_bound(
         const FieldSetup& setup) noexcept {
     constexpr ulong coarse_cutoff = 882;
     silex::detail::AnalyticClassRegulatorCache cache;
@@ -930,28 +985,66 @@ bool check_grh_transaction_refines_to_default_audit(
     if (audit == nullptr || audit->cutoff == coarse_cutoff) {
         return false;
     }
-    const ulong default_cutoff = audit->cutoff;
 
-    silex::ClassGroupComputeOptions options;
-    sflint::Fmpz factor_base_bound;
-    if (!configure_native_options(options, factor_base_bound,
-                                  setup.maximal_order)) {
-        return false;
-    }
-    options.requested_certification = silex::CertificationMode::grh;
     silex::ClassGroupContext class_group;
-    silex::OrderUnitGroup units;
-    silex::detail::ClassUnitTransactionReport report;
-    if (!silex::detail::compute_class_unit_transaction(
-                units, class_group, setup.maximal_order,
-                sflint::FmpzConstRef(factor_base_bound), options, 128,
-                report)) {
+    IndexBoundScopeCounts counts;
+    if (!run_grh_transaction_counting_index_bound_scopes(class_group, counts,
+                                                         setup)) {
         return false;
     }
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    if (counts.refined == 0 || counts.fallback != 0) {
+        return false;
+    }
+#endif
     const std::optional<silex::ClassGroupZetaBfProofRecord> record =
             class_group.zeta_bf_proof_record();
-    return record.has_value() && default_cutoff != coarse_cutoff &&
-           record->cutoff == coarse_cutoff;
+    return record.has_value() && record->cutoff == coarse_cutoff;
+}
+
+// The real quadratic field of x^2 - x - 2500000001 (D = 10000000005) has
+// a coarse cutoff of 3168, but the coarse value does not show index one at
+// the first test.  The refined value is tried there and does not decide: no
+// cutoff up to the default maximum reaches log radius 1/14, which a coarse
+// bound of 7 or more asks for.  The default hR then decides the bounds and
+// stays cached, so ensure_index_one() declines afterwards and the
+// transaction records the default audit, not the coarse one.
+bool check_grh_transaction_records_default_audit(
+        const FieldSetup& setup) noexcept {
+    constexpr ulong coarse_cutoff = 3168;
+    silex::detail::AnalyticClassRegulatorCache cache;
+    if (!cache.ensure_index_one(setup.maximal_order, 128) ||
+        cache.value_bf_audit() == nullptr ||
+        cache.value_bf_audit()->cutoff != coarse_cutoff ||
+        cache.ensure_index_one_refined(setup.maximal_order, 128, 14) ||
+        !cache.ensure(setup.maximal_order, 128)) {
+        return false;
+    }
+    const silex::detail::ZetaBfRouteAudit* audit = cache.value_bf_audit();
+    if (audit == nullptr || audit->cutoff == coarse_cutoff) {
+        return false;
+    }
+    const silex::detail::ZetaBfRouteAudit& default_audit = *audit;
+    silex::ClassGroupContext class_group;
+    IndexBoundScopeCounts counts;
+    if (!run_grh_transaction_counting_index_bound_scopes(class_group, counts,
+                                                         setup)) {
+        return false;
+    }
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    if (counts.refined == 0 || counts.fallback == 0) {
+        return false;
+    }
+#endif
+    const std::optional<silex::ClassGroupZetaBfProofRecord> record =
+            class_group.zeta_bf_proof_record();
+    return record.has_value() && record->cutoff == default_audit.cutoff &&
+           record->max_cutoff == default_audit.max_cutoff &&
+           record->requested_precision ==
+                   default_audit.requested_precision &&
+           record->work_precision == default_audit.work_precision &&
+           ::arb_equal(record->error_bound.raw(),
+                       default_audit.error_bound.raw()) != 0;
 }
 
 // The grh default-route product (Belabas-Friedman residue at the default
@@ -1744,6 +1837,7 @@ int main() {
                                         1, 1, 1, 1, 1, 1, 1, 1, 1};
     const slong x2_minus_210[] = {-210, 0};
     const slong x3_plus_x_plus_200[] = {200, 1, 0};
+    const slong x2_minus_x_minus_2500000001[] = {-2500000001, -1};
 
     return !check_failed_call_preserves_outputs(quadratic.maximal_order,
                                                 20000) ||
@@ -1764,8 +1858,11 @@ int main() {
                            setup_from_coefficients(simplest_cubic_a6, 3)) ||
                    !check_grh_transaction_records_index_one_audit(
                            setup_from_coefficients(x2_minus_210, 2)) ||
-                   !check_grh_transaction_refines_to_default_audit(
+                   !check_grh_transaction_records_coarse_audit_after_refined_bound(
                            setup_from_coefficients(x3_plus_x_plus_200, 3)) ||
+                   !check_grh_transaction_records_default_audit(
+                           setup_from_coefficients(x2_minus_x_minus_2500000001,
+                                                   2)) ||
                    !check_linear_factor_count_cache(
                            setup_from_coefficients(d12_coefficients, 12)) ||
                    !check_linear_factor_count_cache(
