@@ -12359,6 +12359,17 @@ namespace {
 constexpr ulong kGeneratorAssociateNormKeyPrime = UWORD(2305843009213693951);
 // 2^62 - 57, prime; the residues modulo it only propose a solution.
 constexpr ulong kGeneratorAssociateSolvePrime = UWORD(4611686018427387847);
+// Largest order degree n at which the pre-check runs.  Its cost grows like
+// n^3 per prepared entry (M and the Gauss-Jordan inverse) and n^2 per
+// equal-norm entry tried, while a skip saves one factoring; in fields with
+// many equal-norm conjugates (cyclotomic) most tries miss.  Measured over
+// the class-unit corpus in grh mode (instruction counts, pre-check on
+// against off): net savings for n <= 7 (-2.2% at n = 3 to 5), a net loss
+// from n = 8 on (+0.3% at n = 8, +4% at n = 12, +15% at n = 20 to 24, about
+// 2x on cyclotomic_64_phi32 and cyclotomic_real_136_deg32).  The cap only
+// selects whether the pre-check runs; every candidate it would skip reaches
+// the same duplicate skip on the full path.
+constexpr slong kGeneratorAssociateMaxDegree = 7;
 
 // Forms M and M^-1 mod p for `entry` (see GeneratorAssociateEntry).  Row i
 // of M is the sum over j of beta_j times row i * n + j of the order
@@ -12592,11 +12603,13 @@ bool ClassGroupContext::try_append_integral_generator_relation_(
     // stored would factor to that stored row and end at the duplicate skip
     // of append_relation_with_outcome_.  Apply exactly that outcome (the
     // row capture, one skipped dependent relation, the log line) without
-    // factoring it.
+    // factoring it.  Only up to degree kGeneratorAssociateMaxDegree, where
+    // it costs less than the factoring it saves.
     const bool use_associate_index =
             generator_relation_policy_ ==
                     DependentRelationPolicy::keep_nonduplicate &&
             private_storage_ != nullptr &&
+            parent_.degree() <= kGeneratorAssociateMaxDegree &&
             fmpz_is_one(fmpq_denref(norm.raw())) &&
             !fmpz_is_zero(fmpq_numref(norm.raw()));
     if (use_associate_index) {

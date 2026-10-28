@@ -821,6 +821,62 @@ int test_generator_associate_precheck_skips_associates() {
     return 0;
 }
 
+// Above kGeneratorAssociateMaxDegree the associate pre-check is off, so an
+// associate of a stored generator reaches the full path and ends at its
+// duplicate skip: the skipped-dependent count rises, the associate counter
+// does not, and the outcome is the same.  Q(zeta_16), t = zeta_16:
+// 1 + t has norm Phi_16(-1) = 2 and t (1 + t) = t + t^2 is an associate.
+int test_generator_associate_precheck_off_above_degree_cap() {
+    using Access = silex::detail::ClassGroupRelationSearchAccess;
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 8, 1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, 1);
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    silex::Order order;
+    order = silex::test::verified_maximal_order(
+            silex::test::equation_order(field));
+    assert(order.is_equation_order() && order.degree() == 8);
+    sflint::Fmpz bound;
+    assert(set_fmpz_si(bound, 40));
+    silex::ClassGroupContext context(order);
+    assert(context.build_factor_base(sflint::FmpzConstRef(bound)));
+    Access::use_route_generator_relation_policy(context);
+
+    sflint::FmpzMat coordinates(1, 8);
+    silex::OrderElement order_element(order);
+    silex::Element element(field);
+    sflint::Fmpq norm;
+    auto append = [&](slong c0, slong c1, slong c2) {
+        sflint::fmpz_mat_zero(sflint::FmpzMatRef(coordinates));
+        sflint::fmpz_set_si(sflint::fmpz_mat_entry(coordinates, 0, 0), c0);
+        sflint::fmpz_set_si(sflint::fmpz_mat_entry(coordinates, 0, 1), c1);
+        sflint::fmpz_set_si(sflint::fmpz_mat_entry(coordinates, 0, 2), c2);
+        assert(order_element.set_coordinates(
+                sflint::FmpzMatConstRef(coordinates)));
+        assert(order_element.get_element(element));
+        assert(element.norm(sflint::FmpqRef(norm)));
+        assert(sflint::fmpq_equal_si(sflint::FmpqConstRef(norm), 2));
+        bool throttle = false;
+        assert(Access::try_append_integral_generator_relation(
+                context, throttle, element,
+                sflint::FmpzMatConstRef(coordinates),
+                sflint::FmpqConstRef(norm), nullptr,
+                silex::ClassGroupRelationSource::Search));
+        assert(!throttle);
+    };
+
+    append(1, 1, 0);
+    assert(context.relation_count() == 1);
+    assert(context.skipped_dependent_relation_count() == 0);
+    append(0, 1, 1);
+    assert(context.relation_count() == 1);
+    assert(context.skipped_dependent_relation_count() == 1);
+    assert(Access::generator_associate_skipped_candidates(context) == 0);
+    return 0;
+}
+
 // The small-LLL torsion-orbit skip passes over a candidate only when its
 // full test would count it and then skip its exponent row as an exact
 // repeat of a stored row (keep_nonduplicate).  Over Q(zeta_16) the reduced
@@ -9796,6 +9852,7 @@ int main() {
     test_append_tracks_rank_and_skips_nonrefining_dependent_rows();
     test_keep_nonduplicate_skips_exact_repeat_only();
     test_generator_associate_precheck_skips_associates();
+    test_generator_associate_precheck_off_above_degree_cap();
     test_small_lll_torsion_orbit_skip_keeps_counters();
     test_publish_matches_relation_lattice_after_mixed_appends();
     test_append_keeps_index_refining_dependent_rows();
