@@ -234,6 +234,27 @@ Changed
   ``pure_x4_minus_7`` (+0.30%), ``imaginary_quadratic_34_grh`` (+0.24%) and
   ``imaginary_quadratic_d10000000799`` (+0.10%) are slightly slower.
 
+- That stored-generator check now runs only on orders of degree at most 7.
+  Each stored generator it prepares costs a matrix inverse of size ``n``,
+  and in fields with many conjugates of equal norm, such as cyclotomic
+  fields, most checks find no match, so above degree 7 it cost more than
+  the factoring it saved: up to twice the instructions of the whole
+  computation.  Results and counters are unchanged, and ``grh`` outputs
+  with timing keys removed are identical on 171 corpus rows.  Callgrind
+  instruction counts of ``grh`` (busy machine) return to their level before
+  the check on ``cyclotomic_64_phi32`` (3,895.7M to 1,875.4M, -51.9%) and
+  ``cyclotomic_real_136_deg32`` (13,204.7M to 5,683.4M, -57.0%), and fall by
+  10.9% on ``cyclotomic_39_phi24`` and 2.8% on
+  ``random_d12_h2_s16_proven``.  Orders of degree at most 7, including the
+  ten rows above, keep the check and its savings.  The seven corpus rows of
+  degree 8 to 10 that gained from the check lose that gain and are slower:
+  ``octic_x8_minus_x_minus_1_proven`` (+1.59%),
+  ``nonic_x9_minus_x_minus_1_proven`` (+1.53%),
+  ``decic_x10_minus_x_minus_1_proven`` (+0.83%),
+  ``lmfdb_8_8_82944000000_1`` (+0.83%), ``lmfdb_8_8_73116160000_2``
+  (+0.68%), ``lmfdb_8_0_64000000_3`` (+0.27%) and
+  ``cyclotomic_real_q10_c11_deg10`` (+0.18%).
+
 - The saturation proof scans (the stable scan and the proof-prime
   selectors) update the ``ell``-character kernel when a column is appended,
   intersecting the previous kernel with the new character as Hecke
