@@ -132,6 +132,23 @@ Added
 
 Changed
 -------
+- The exact count of reduced forms of a fundamental imaginary quadratic
+  discriminant (the ``proven`` route for ``|D| < 2^54`` and the ``grh`` route
+  below ``2^34``) keeps the square roots of ``D`` modulo each prime power
+  from its FLINT ``n_sqrtmod_primepow`` calls and, for ``4a^2 >= |D|``,
+  builds the roots modulo ``4a`` by the Chinese remainder theorem from them,
+  with ``4a`` factored by a sieve, instead of calling ``n_factor`` and
+  ``n_sqrtmodn`` for every such ``a``.  The roots, and so the counts, are the
+  same: the count equals that of commit 6dd17810 on 92,132 fundamental
+  discriminants (every one with ``|D| <= 300000`` and others up to
+  ``2^44``), and ``proven`` and ``grh`` outputs of nine imaginary quadratic
+  rows, timing keys removed, are identical.  Callgrind Ir against commit
+  6dd17810 (busy machine; no wall timing): the count on
+  ``imaginary_quadratic_d10000000799`` drops from 39.30M to 21.23M, and the
+  whole ``grh`` run by 21.32% (``proven`` 1.64%); on
+  ``imaginary_quadratic_d100000031`` the count drops from 3.65M to 2.07M and
+  the ``grh`` run by 5.08% (``proven`` 0.58%).
+
 - ``logarithmic_embedding`` logs every place at no more than the working
   precision equal to the least relative accuracy over the places plus
   that place's own exponent bit length plus ``MAG_BITS`` (FLINT's

@@ -2203,11 +2203,15 @@ without building them, in ``src/class_group/reduced_form_count.cpp``:
   and Corollary 1.3.10), computed by a sieve over the primes up to
   ``sqrt(|D| / 3)``, with each ``R(p^e)`` the root count of FLINT
   ``n_sqrtmod_primepow``, called once per pair ``(p, e)``;
-- when ``4a^2 >= |D|``, the roots ``b`` modulo ``4a`` are listed by FLINT
-  ``n_sqrtmodn`` and a root is counted when ``(a, b, c)`` is reduced:
+- when ``4a^2 >= |D|``, the roots ``b`` modulo ``4a`` are the
+  Chinese-remainder combinations (Cohen, Theorem 1.3.9) of the roots modulo
+  the prime powers exactly dividing ``4a``, kept from the
+  ``n_sqrtmod_primepow`` calls of the sieve, with ``4a`` factored by a second
+  sieve over these ``a``; a root is counted when ``(a, b, c)`` is reduced:
   ``|b| <= a <= c``, and ``b >= 0`` when ``|b| = a`` or ``a = c`` (Cohen,
-  Definition 5.3.2).  The count fails closed if ``n_sqrtmodn`` lists a
-  different number of roots than the product ``R(4a)``.
+  Definition 5.3.2).  The count fails closed if the factorisation does not
+  rebuild ``a`` or the number of combined roots differs from the product
+  ``R(4a)``.
 
 FLINT is called only as a library; no FLINT code is ported.  FLINT 3.6.0
 ``qfb_reduced_forms`` (``qfb/reduced_forms.c``), which lists the forms, is

@@ -89,6 +89,22 @@ void check_against_listing() noexcept {
     check(compared == 60800, "number of fundamental D compared", 0);
 }
 
+// Discriminants with many small prime factors, so the band a >= sqrt(|D|) / 2
+// meets many odd prime powers and every 2-power exponent: the count, whose
+// band roots are the CRT combinations of the cached prime-power roots,
+// equals FLINT's listing.
+void check_smooth_discriminants() noexcept {
+    for (const slong d : {-111546435L, -38798760L, -4313128820L}) {
+        const ulong n = static_cast<ulong>(-d);
+        check(reference_fundamental(n), "smooth row is fundamental", d);
+        ulong count = 0;
+        check(detail::imaginary_quadratic_fundamental_reduced_form_count(
+                      count, n) &&
+                      count == static_cast<ulong>(listed_reduced_forms(d)),
+              "smooth count equals qfb_reduced_forms", d);
+    }
+}
+
 // Fixed rows: the count, and the class number through the shipped switch.
 // h(-17592186044415) is the largest fundamental |D| row below the listing
 // cutoff 2^44, and D = -(2^44 + 3) is counted above it (the count cutoff is
@@ -154,6 +170,7 @@ void check_non_fundamental_fallback() noexcept {
 
 int main() {
     check_against_listing();
+    check_smooth_discriminants();
     check_fixed_rows();
     check_non_fundamental_fallback();
     if (failures != 0) {

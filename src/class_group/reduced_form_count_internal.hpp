@@ -23,16 +23,20 @@ bool imaginary_quadratic_discriminant_is_fundamental(
 //   the prime powers p^e exactly dividing 4a (the Chinese remainder theorem,
 //   Cohen, Theorem 1.3.9 and Corollary 1.3.10), and each R(p^e) is the root
 //   count of FLINT `n_sqrtmod_primepow`;
-// - when 4a^2 >= |D|, the roots come from FLINT `n_sqrtmodn` and are kept
-//   when (a, b, c) is reduced: |b| <= a <= c, and b >= 0 when |b| = a or
-//   a = c (Cohen, Definition 5.3.2).
+// - when 4a^2 >= |D|, the roots mod 4a are the Chinese-remainder
+//   combinations of the roots mod the prime powers exactly dividing 4a, kept
+//   from the `n_sqrtmod_primepow` calls above (4a is factored by a sieve over
+//   the band), and are kept when (a, b, c) is reduced: |b| <= a <= c, and
+//   b >= 0 when |b| = a or a = c (Cohen, Definition 5.3.2).
 //
 // Sets `out` and returns true when D = -abs_discriminant is fundamental and
 // |D| < 2^62.  Returns false, leaving `out` unspecified, otherwise, or when
-// a band root count from `n_sqrtmodn` disagrees with the product R(4a).  On a
+// an internal consistency check fails: the band factorisation does not
+// rebuild a, the number of band roots disagrees with the product R(4a), or
+// FLINT returns a root set that a fundamental D does not allow.  On a
 // non-fundamental D the sum would also count imprimitive forms, so it is
-// refused.  Memory is about 5 bytes per a <= sqrt(|D| / 3); the caller bounds
-// |D|.
+// refused.  Memory is about 5 bytes per a <= sqrt(|D| / 3); the caller
+// bounds |D|.
 bool imaginary_quadratic_fundamental_reduced_form_count(
         ulong& out,
         ulong abs_discriminant) noexcept;
