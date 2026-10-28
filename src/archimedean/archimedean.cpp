@@ -236,17 +236,21 @@ bool logarithmic_embedding(flint::ArbVecRef out,
     // midpoint, which is added to the radius).  So each entry still
     // encloses log |sigma_i(element)| (or twice it in product mode at a
     // complex place); only its radius can change.
+    // The cap is at least least_accuracy + MAG_BITS, so it is computed only
+    // when that is below the evaluation precision.
+    const bool may_cap = least_accuracy + MAG_BITS < precision;
     for (slong i = 0; i < places; ++i) {
         slong log_precision = precision;
-        mag_t lower;
-        mag_init(lower);
-        arb_get_mag_lower(lower, tmp.data() + i);
-        const slong exponent_bits =
-                static_cast<slong>(fmpz_bits(MAG_EXPREF(lower)));
-        mag_clear(lower);
-        if (least_accuracy < precision &&
-            least_accuracy + exponent_bits + MAG_BITS < precision) {
-            log_precision = least_accuracy + exponent_bits + MAG_BITS;
+        if (may_cap) {
+            mag_t lower;
+            mag_init(lower);
+            arb_get_mag_lower(lower, tmp.data() + i);
+            const slong exponent_bits =
+                    static_cast<slong>(fmpz_bits(MAG_EXPREF(lower)));
+            mag_clear(lower);
+            if (least_accuracy + exponent_bits + MAG_BITS < precision) {
+                log_precision = least_accuracy + exponent_bits + MAG_BITS;
+            }
         }
         arb_log(tmp.data() + i, tmp.data() + i, log_precision);
     }
