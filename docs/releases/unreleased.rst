@@ -330,9 +330,9 @@ Changed
   ``x^19 - x - 1`` (867.34M to 810.08M) and by 2.46% on ``x^16 - x - 1``
   (409.23M to 399.17M).
 
-- On orders other than the equation order, ``decompose_prime`` no longer
-  builds the Hermite normal form of each prime ``pO + gO`` when it decomposes
-  ``p``.  The prime keeps ``g`` and builds the same matrix, by the same
+- When the closed forms above do not apply (always on orders other than the
+  equation order), ``decompose_prime`` no longer builds the Hermite normal
+  form of each prime ``pO + gO`` when it decomposes ``p``.  The prime keeps ``g`` and builds the same matrix, by the same
   modular HNF, the first time the ideal itself is read (``get_ideal``,
   membership and valuation, ``equal``, ideal powers); ``p``, ``e``, ``f``,
   the norm and the residue data are available without it.  Copies carry the

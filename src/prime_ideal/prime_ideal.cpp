@@ -3264,7 +3264,9 @@ const Ideal& PrimeIdeal::integral_ideal() const noexcept {
         // made eagerly before the HNF was deferred, so the stored HNF is
         // unchanged.  set_data_two_generator made every check by which it can
         // refuse; the ideal is left without an HNF only if it fails anyway,
-        // and then each later read retries.
+        // and then each later read retries.  The valuation readers check
+        // has_hnf() and fail rather than read an unbuilt HNF; Ideal::equal
+        // already returns false on an ideal without one.
         Ideal built(parent_);
         if (built.is_defined() &&
             detail::set_known_two_generator_ideal(
@@ -3564,7 +3566,12 @@ bool PrimeIdeal::valuation_by_power_containment(
     {
         SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::prime_ideal,
                             "prime_ideal.valuation_containment_initial_contains");
-        if (!integral_ideal().contains(element)) {
+        // A deferred HNF that could not be built is a failure, not v = 0.
+        const Ideal& prime = integral_ideal();
+        if (!prime.has_hnf()) {
+            return false;
+        }
+        if (!prime.contains(element)) {
             out = 0;
             return true;
         }
@@ -3865,7 +3872,12 @@ bool PrimeIdeal::valuation_with_norm_vp_impl(
             SILEX_PROFILE_SCOPE(
                     diagnostics, DiagnosticsModule::prime_ideal,
                     "prime_ideal.valuation_containment_initial_contains");
-            if (!integral_ideal().contains(element)) {
+            // A deferred HNF that could not be built is a failure, not v = 0.
+            const Ideal& prime = integral_ideal();
+            if (!prime.has_hnf()) {
+                return false;
+            }
+            if (!prime.contains(element)) {
                 SILEX_PRIME_IDEAL_PROFILE_EVENT(
                         diagnostics,
                         "prime_ideal.valuation_order_element.path_not_in_prime");
@@ -3963,7 +3975,7 @@ bool PrimeIdeal::valuation(slong& out,
                         "prime_ideal.valuation_ideal");
     if (!has_prime_data() || !same_order_parent(ideal.parent(), &parent_) ||
         !ideal.has_hnf() || !parent_.is_maximal() ||
-        integral_ideal().is_one() || f_ <= 0) {
+        !integral_ideal().has_hnf() || integral_ideal().is_one() || f_ <= 0) {
         return false;
     }
 

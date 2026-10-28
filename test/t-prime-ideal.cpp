@@ -879,8 +879,8 @@ bool prime_hnf_matches(const silex::PrimeIdeal& prime,
     return prime.get_ideal(stored) && same_hnf(stored, expected);
 }
 
-// On a non-equation order, decompose_prime defers the HNF of
-// p O + g O to its first read.  Whichever consumer reads it first, the HNF
+// When the closed forms do not apply (always on a non-equation order, as
+// here), decompose_prime defers the HNF of p O + g O to its first read.  Whichever consumer reads it first, the HNF
 // is the one the eager build stored, and reads of p, e, f and the residue
 // data leave it deferred.
 int test_deferred_two_generator_prime_hnf() {
