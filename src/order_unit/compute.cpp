@@ -3453,7 +3453,9 @@ bool reduce_relation_units_modulo(std::vector<FactoredElement>& values,
         // Test seam, off in every real run (see ComputeTestSeams): replace
         // the coefficients by fixed approximate ones, so a test can reach
         // the retry bound below.
-        if (coordinates_ok &&
+        // The seam writes entry (0, 0), so it needs a nonempty matrix.
+        if (coordinates_ok && flint::fmpz_mat_nrows(coefficients) > 0 &&
+            flint::fmpz_mat_ncols(coefficients) > 0 &&
             ComputeTestSeams::
                     reduce_mod_units_fixed_approximate_coefficients()) {
             flint::fmpz_mat_zero(coefficients);

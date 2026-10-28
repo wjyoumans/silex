@@ -1314,8 +1314,6 @@ bool word_quotient_log_baby_giant(
         ulong p_ui,
         ulong ell_ui,
         const DiagnosticsContext* diagnostics) noexcept {
-    SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::unit_group,
-                        "unit_group.residue_dlog_proof_matrix.baby_giant");
     nmod_t mod;
     nmod_init(&mod, p_ui);
     nmod_t ell_mod;
@@ -1354,6 +1352,10 @@ bool word_quotient_log_baby_giant(
     if (table == nullptr) {
         return false;
     }
+    // Emitted only once the table exists, so a trace whose allocation
+    // failed shows just the shared walk that actually ran.
+    SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::unit_group,
+                        "unit_group.residue_dlog_proof_matrix.baby_giant");
     WordQuotientLogBabyStep* const slots = table.get();
     for (std::size_t k = 0; k <= mask; ++k) {
         slots[k].value = kWordQuotientLogEmptySlot;

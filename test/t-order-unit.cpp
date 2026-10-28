@@ -7310,6 +7310,14 @@ int test_word_quotient_logs_table_failure_takes_walk() {
     for (const ulong e : exponents) {
         images.push_back(n_powmod2_ui_preinv(zeta, e, p, p_inverse));
     }
+    // One image outside <zeta> (x^ell != 1): it has no logarithm, so both
+    // routes must leave it unresolved.
+    ulong outside = 2;
+    while (n_powmod2_ui_preinv(outside, ell, p, p_inverse) == 1) {
+        ++outside;
+    }
+    images.push_back(outside);
+    const std::size_t inside_count = images.size() - 1;
     for (const bool fail : {true, false}) {
         std::vector<ulong> logs;
         std::vector<bool> resolved;
@@ -7333,11 +7341,15 @@ int test_word_quotient_logs_table_failure_takes_walk() {
             logs.size() != images.size()) {
             return 1;
         }
-        for (std::size_t j = 0; j < images.size(); ++j) {
+        for (std::size_t j = 0; j < inside_count; ++j) {
             assert(resolved[j] && logs[j] == exponents[j]);
             if (!resolved[j] || logs[j] != exponents[j]) {
                 return 1;
             }
+        }
+        assert(resolved.size() == images.size() && !resolved[inside_count]);
+        if (resolved.size() != images.size() || resolved[inside_count]) {
+            return 1;
         }
     }
     return 0;
