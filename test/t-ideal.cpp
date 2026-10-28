@@ -4140,7 +4140,7 @@ int test_triangular_basis_contains_matches_hnf_reference() {
     ContainsRng rng{0x7a1a5017};
     slong members = 0;
     slong nonmembers = 0;
-    for (slong n : {1, 2, 3, 5, 8}) {
+    for (slong n : {1, 2, 3, 5, 8, 33}) {
         for (slong trial = 0; trial < 24; ++trial) {
             sflint::FmpzMat basis(n, n);
             for (slong i = 0; i < n; ++i) {
