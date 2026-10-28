@@ -2736,6 +2736,28 @@ Changed
   one-LLL route and returns to the outputs and time it had before this
   check.
 
+- The two-LLL ideal-lattice reduction of the LLL relation search (and of
+  the continuation search of the class-group ideal-relation witness) now
+  starts each ideal's precision schedule at the precision the order's
+  previous two-LLL reduction succeeded at, instead of at the requested
+  precision.  An order whose ideals all fail the rounding checks at 200 bits
+  and pass at 400 no longer repeats the failed 200-bit attempt for each
+  ideal.  Every basis is still accepted only by the same checks at the
+  precision it was built at.  Visible consequence: in an order where an
+  earlier ideal needed a higher precision and a later ideal would have
+  passed at a lower one, the later ideal now gets the reduced basis of the
+  higher precision, a different but equally valid LLL basis, so relations,
+  ``relation_sources`` and the chosen fundamental units or witness
+  multipliers can differ (class groups, regulators and labels are
+  unaffected).  On the 184 ``grh`` corpus rows (``cyclotomic_real_163_deg81``
+  not run) no order has such an ideal, and the instance JSON, with timing
+  keys removed, is identical.  Whole-process callgrind Ir of ``grh`` drops by
+  10.30% on ``cyclotomic_real_q10_c11_deg10``; it is unchanged (within
+  0.001%) on ``multiquadratic_m3_m5_m7``, ``multiquadratic_m23_m31_m47``,
+  ``lmfdb_6_6_49744125_1``, ``lmfdb_8_8_82944000000_1`` and
+  ``nonadecic_x19_minus_x_minus_1``.  See "Class groups and order units"
+  in :doc:`../reference/algorithms_and_sources`.
+
 - ``roots_of_unity``, ``root_of_unity_order`` and ``root_of_unity_generator``
   remember their result per thread for the last few defining polynomials,
   so repeated queries on the same field, such as those made during a

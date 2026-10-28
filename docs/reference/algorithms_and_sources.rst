@@ -1308,6 +1308,18 @@ path is therefore already stricter than Hecke's, and the raise moves Silex
 toward Hecke's behavior there of rounding at the first precision.
 Attempts that pass the rounding check are unchanged, and every relation is
 still verified exactly.
+In its general case Hecke's ``lll`` (``LLL.jl:47-86``) starts every ideal
+at the caller's precision and doubles it after each failed attempt.  As a second deviation in
+the precision schedule only, Silex remembers, per order (in the relation
+search's per-order cache and for the search ideals of one ideal-relation
+witness), the precision at which the last two-LLL reduction succeeded, and
+starts the next ideal of that order there when it is higher than the
+requested precision.  An order whose ideals all fail at the requested
+precision then pays for the failed attempts once rather than once per ideal.
+A warm-started reduction is the reduction Hecke's loop would return when
+called at that precision, with the same checks; an ideal that would have
+passed at a lower precision gets the reduced basis at the higher one, a
+different but equally valid basis.
 
 The small-LLL phase of the LLL relation search reduces each ideal with one
 integer LLL, as PARI 2.17.3 ``buch2.c:Fincke_Pohst_ideal`` (2461-2462) does
