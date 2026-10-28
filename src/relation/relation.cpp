@@ -3,6 +3,7 @@
 #include "relation_internal.hpp"
 #include "../ideal/ideal_access_internal.hpp"
 #include "../order/order_internal.hpp"
+#include "../order_element/order_element_internal.hpp"
 #include "../prime_ideal/prime_ideal_internal.hpp"
 
 #include <silex/abelian_group.hpp>
@@ -607,9 +608,19 @@ bool factor_integral_data_over_base_by_residue_screen(
             return false;
         }
         if (known_integral_coordinates != nullptr) {
-            if (!integral_alpha.set_coordinates(
-                        flint::FmpzMatConstRef(
-                                known_integral_coordinates))) {
+            // A caller that passes both alpha and its integral coordinates
+            // has already converted one into the other, so both are copied
+            // instead of multiplying the coordinates by the order basis
+            // again.
+            if (alpha != nullptr
+                        ? !detail::OrderElementAccess::
+                                  set_element_with_coordinates(
+                                          integral_alpha, *alpha,
+                                          flint::FmpzMatConstRef(
+                                                  known_integral_coordinates))
+                        : !integral_alpha.set_coordinates(
+                                  flint::FmpzMatConstRef(
+                                          known_integral_coordinates))) {
                 return false;
             }
         } else if (alpha == nullptr || !integral_alpha.set_element(*alpha)) {
@@ -636,16 +647,17 @@ bool factor_integral_data_over_base_by_residue_screen(
             return true;
         }
         flint::FmpqPoly polynomial;
-        if (known_integral_coordinates == nullptr && alpha != nullptr) {
+        // alpha is the element of the integral coordinates when both are
+        // given.  Without alpha, the element comes from integral_alpha,
+        // which the direct valuations below reuse.
+        if (alpha != nullptr) {
             if (!alpha->get_fmpq_poly(flint::FmpqPolyRef(polynomial))) {
                 return false;
             }
         } else {
             Element element(*parent->parent());
-            if (!element.is_defined() ||
-                !set_element_from_integral_coordinates(
-                        element, *parent,
-                        flint::FmpzMatConstRef(coordinate_rows)) ||
+            if (!element.is_defined() || !ensure_integral_alpha() ||
+                !integral_alpha.get_element(element) ||
                 !element.get_fmpq_poly(flint::FmpqPolyRef(polynomial))) {
                 return false;
             }

@@ -9,6 +9,7 @@
 
 #include <utility>
 
+#include "order_element_internal.hpp"
 #include "../order/order_internal.hpp"
 
 namespace silex {
@@ -217,6 +218,34 @@ bool OrderElement::set_coordinates(flint::FmpzMatConstRef coordinates) noexcept 
     fmpz_mat_set(coords_.raw(), coordinates.raw());
     return true;
 }
+
+namespace detail {
+
+bool OrderElementAccess::set_element_with_coordinates(
+        OrderElement& out,
+        const Element& element,
+        flint::FmpzMatConstRef coordinates) noexcept {
+    if (!out.is_defined() || out.parent_.parent() == nullptr ||
+        !element.has_parent(*out.parent_.parent()) ||
+        !fmpz_mat_shape(coordinates, 1, out.parent_.degree())) {
+        return false;
+    }
+#if defined(SILEX_ENABLE_DEBUG_CHECKS) && SILEX_ENABLE_DEBUG_CHECKS
+    // Debug builds verify the caller's guarantee.
+    OrderElement expected(out.parent_);
+    if (!expected.set_coordinates(coordinates) ||
+        !expected.value_.equal(element)) {
+        return false;
+    }
+#endif
+    if (!out.value_.set(element)) {
+        return false;
+    }
+    fmpz_mat_set(out.coords_.raw(), coordinates.raw());
+    return true;
+}
+
+}  // namespace detail
 
 bool OrderElement::get_element(Element& out) const noexcept {
     if (!is_defined() || parent_.parent() == nullptr ||

@@ -715,7 +715,8 @@ struct ScreenFallbackCounts {
 
 // Every element with order coordinates in [-range, range]^n is factored
 // three ways: through the integral-coordinate screen (with its handled flag),
-// through Relation::set_generator and the coordinate entry point, and by the
+// through Relation::set_generator, the coordinate entry point and the
+// generator-with-coordinates entry point, and by the
 // exact principal-ideal factorization the screen falls back to.  All rows
 // must agree, and the screen's row with the last valuation over each prime
 // deduced from the norm must equal its row with every valuation computed.
@@ -820,6 +821,13 @@ void check_screen_matches_ideal_fallback(ScreenFallbackCounts& counts,
             silex::Relation generator_relation(base);
             assert(generator_relation.set_generator(alpha) ==
                    expected_smooth);
+            // The generator together with its coordinates: the screen
+            // reuses alpha instead of converting the coordinates again.
+            silex::Relation known_relation(base);
+            assert(RelationAccess::set_relation_from_integral_coordinates_and_norm(
+                           known_relation, alpha,
+                           sflint::FmpzMatConstRef(coordinates),
+                           sflint::FmpqConstRef(norm)) == expected_smooth);
             if (expected_smooth) {
                 assert(coordinate_relation.exponents(
                         sflint::FmpzMatRef(actual)));
@@ -828,6 +836,10 @@ void check_screen_matches_ideal_fallback(ScreenFallbackCounts& counts,
                         sflint::FmpzMatConstRef(expected)));
                 assert(generator_relation.exponents(
                         sflint::FmpzMatRef(actual)));
+                assert(sflint::fmpz_mat_equal(
+                        sflint::FmpzMatConstRef(actual),
+                        sflint::FmpzMatConstRef(expected)));
+                assert(known_relation.exponents(sflint::FmpzMatRef(actual)));
                 assert(sflint::fmpz_mat_equal(
                         sflint::FmpzMatConstRef(actual),
                         sflint::FmpzMatConstRef(expected)));

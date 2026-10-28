@@ -10,6 +10,10 @@
 
 namespace silex {
 
+namespace detail {
+class OrderElementAccess;
+}  // namespace detail
+
 class OrderElement {
 public:
     OrderElement() noexcept = default;
@@ -49,6 +53,8 @@ public:
     bool equal_si(slong value) const noexcept;
 
 private:
+    friend class detail::OrderElementAccess;
+
     Order parent_;
     Element value_;
     flint::FmpzMat coords_{0, 0};
