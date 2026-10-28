@@ -3411,6 +3411,15 @@ PrimeIdeal::coordinate_valuation_matrix_cached() const noexcept {
     if (!has_prime_data() || parent_.parent() == nullptr) {
         return nullptr;
     }
+    // Without a residue polynomial (a prime over an index divisor) there is
+    // no Kummer quotient map, so no cache is built; test that before
+    // allocating the n x n cache, since the direct valuation of a
+    // residue-less prime asks again on every call.
+    if (!has_residue_poly_ ||
+        !(residue_in_integral_generator_ || parent_.is_equation_order() ||
+          parent_.is_maximal())) {
+        return nullptr;
+    }
 
     std::unique_ptr<CoordinateValuationCache> next(
             new (std::nothrow)
@@ -3420,9 +3429,7 @@ PrimeIdeal::coordinate_valuation_matrix_cached() const noexcept {
     }
 
     bool initialized = false;
-    if (has_residue_poly_ &&
-        (residue_in_integral_generator_ || parent_.is_equation_order() ||
-         parent_.is_maximal())) {
+    {
         flint::Fmpz radicand;
         if (residue_in_integral_generator_) {
             initialized =
