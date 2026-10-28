@@ -473,6 +473,26 @@ enum class DirectLargePrimeStatus {
     found,
     no_candidate,
     out_of_bound,
+    // The norm screen divided |N(alpha)| down to 1 over the factor base's
+    // rational primes, so any prime above it lies over a base rational prime.
+    smooth,
+    // A smooth norm whose base-prime valuations leave a norm deficit over
+    // exactly one rational prime: the row holds the base valuations and the
+    // remaining prime ideals lie over that prime (see DirectSmoothNormDeficit).
+    smooth_deficit,
+    // A smooth norm with no deficit or a deficit over two rational primes:
+    // no single prime ideal outside the base, so no partial relation.
+    smooth_discard,
+};
+
+// The one rational prime p of a smooth_deficit row: `norm_vp` is
+// v_p(N(alpha)) and `deficit` is norm_vp minus sum f(P/p) v_P(alpha) over
+// the base primes P above p, that is the sum of f(P/p) v_P(alpha) over the
+// primes above p outside the base (Cohen, GTM 138, Section 4.8).
+struct DirectSmoothNormDeficit {
+    flint::Fmpz p;
+    slong norm_vp = 0;
+    slong deficit = 0;
 };
 
 bool defining_polynomial_is_nice(const NumberField& field) noexcept;
@@ -539,7 +559,7 @@ DirectLargePrimeStatus direct_large_prime_from_norm(
             ::fmpz_divexact(remainder.raw(), remainder.raw(), p.raw());
         }
         if (flint::fmpz_is_one(flint::FmpzConstRef(remainder))) {
-            return DirectLargePrimeStatus::no_candidate;
+            return DirectLargePrimeStatus::smooth;
         }
     }
 
@@ -812,7 +832,8 @@ DirectLargePrimeStatus direct_partial_relation_row(
         const DiagnosticsContext* diagnostics,
         bool word_size_residues = true,
         bool deduce_last_hit_valuation = true,
-        slong* deduced_hit_valuations = nullptr) noexcept {
+        slong* deduced_hit_valuations = nullptr,
+        DirectSmoothNormDeficit* smooth_deficit = nullptr) noexcept {
     // reference Rel_add.jl stores partial relations by the leftover rational
     // prime and `special_prime_ideal`, then subtracts the two `_factor!`
     // rows on a match.  This is the maximal-equation-order integral-element
@@ -833,7 +854,15 @@ DirectLargePrimeStatus direct_partial_relation_row(
                 out_rational_large_prime, generator, base, factor_base_bound,
                 known_norm, known_integral_coordinates);
     }
-    if (status != DirectLargePrimeStatus::found) {
+    // With `smooth_deficit` given, a smooth norm continues through the
+    // base-prime valuations below; they locate the rational prime the one
+    // prime ideal outside the base must lie over, as the full ideal
+    // factorization would.
+    const bool smooth_norm = status == DirectLargePrimeStatus::smooth;
+    if (smooth_norm && smooth_deficit == nullptr) {
+        return DirectLargePrimeStatus::no_candidate;
+    }
+    if (status != DirectLargePrimeStatus::found && !smooth_norm) {
         if (status == DirectLargePrimeStatus::unsupported) {
             SILEX_PROFILE_EVENT(
                     diagnostics, DiagnosticsModule::class_group,
@@ -920,6 +949,22 @@ DirectLargePrimeStatus direct_partial_relation_row(
 
     flint::Fmpz p;
     std::vector<DirectPartialResidueHit> hits;
+    bool have_smooth_deficit = false;
+    // Records a norm deficit left over p after its base-prime valuations.
+    // For alpha in O_K, v_p(N(alpha)) = sum over P | p of f(P/p) v_P(alpha)
+    // (Cohen, GTM 138, Section 4.8), so a deficit means a prime above p
+    // outside the base divides alpha.  Deficits over two rational primes mean
+    // two distinct such prime ideals, which the full factorization rejects.
+    auto record_smooth_deficit = [&](slong norm_vp, slong deficit) noexcept {
+        if (have_smooth_deficit) {
+            return false;
+        }
+        ::fmpz_set(smooth_deficit->p.raw(), p.raw());
+        smooth_deficit->norm_vp = norm_vp;
+        smooth_deficit->deficit = deficit;
+        have_smooth_deficit = true;
+        return true;
+    };
     for (slong block_index = 0;
          block_index < base.rational_prime_block_count() &&
          !flint::fmpz_is_one(flint::FmpzConstRef(remaining_norm));
@@ -1053,6 +1098,14 @@ DirectLargePrimeStatus direct_partial_relation_row(
         }
 
         if (hits.empty()) {
+            if (smooth_norm) {
+                // No base prime above p divides alpha, so the whole of
+                // v_p(N(alpha)) lies outside the base.
+                if (!record_smooth_deficit(remaining_vp, remaining_vp)) {
+                    return DirectLargePrimeStatus::smooth_discard;
+                }
+                continue;
+            }
             return unsupported(
                     "class_group.partial_relation_direct_large_prime_unsupported_exact_vp_leftover");
         }
@@ -1164,11 +1217,33 @@ DirectLargePrimeStatus direct_partial_relation_row(
                           valuation);
             exact_remaining_vp -= valuation * hit.residue_degree;
         }
+        if (smooth_norm && exact_remaining_vp > 0) {
+            if (!record_smooth_deficit(remaining_vp, exact_remaining_vp)) {
+                return DirectLargePrimeStatus::smooth_discard;
+            }
+            exact_remaining_vp = 0;
+        }
         if (exact_remaining_vp != 0) {
             return unsupported(
                     "class_group.partial_relation_direct_large_prime_unsupported_exact_vp_leftover");
         }
         remaining_vp = 0;
+    }
+
+    if (smooth_norm) {
+        if (!flint::fmpz_is_one(flint::FmpzConstRef(remaining_norm))) {
+            return unsupported(
+                    "class_group.partial_relation_direct_large_prime_unsupported_leftover_mismatch");
+        }
+        // With no deficit every prime dividing alpha is in the base, so
+        // there is no prime ideal outside it.
+        if (!have_smooth_deficit) {
+            return DirectLargePrimeStatus::smooth_discard;
+        }
+        out_row = flint::FmpzMat(1, base.length());
+        flint::fmpz_mat_set(flint::FmpzMatRef(out_row),
+                            flint::FmpzMatConstRef(candidate));
+        return DirectLargePrimeStatus::smooth_deficit;
     }
 
     if (!flint::fmpz_equal(flint::FmpzConstRef(remaining_norm),
@@ -1199,6 +1274,87 @@ DirectLargePrimeStatus direct_partial_relation_row(
     flint::fmpz_mat_set(flint::FmpzMatRef(out_row),
                         flint::FmpzMatConstRef(candidate));
     return DirectLargePrimeStatus::found;
+}
+
+// Resolves a smooth_deficit row to its one prime ideal outside the base.
+// The primes above `deficit.p` are those of the full factorization's
+// decomposition of p (IdealFactorization::factor decomposes every p | N(I)
+// with the same decompose_prime call), and the valuation is the same
+// PrimeIdeal element valuation with v_p(N(alpha)) that PrimeIdeal::valuation
+// uses for a principal ideal with a known generator.  Returns `found` with
+// `out_prime` set when one prime P above p outside the base has
+// v_P(alpha) = 1 and accounts for the whole deficit, so it is the only
+// prime outside the base dividing alpha.  Returns `no_candidate` when the
+// full factorization would find two distinct primes outside the base or an
+// exponent other than 1, and `unsupported` when the caller must factor the
+// ideal instead.
+DirectLargePrimeStatus direct_smooth_norm_large_prime(
+        PrimeIdeal& out_prime,
+        const Element& generator,
+        const FactorBase& base,
+        const DirectSmoothNormDeficit& deficit,
+        const fmpz_mat_struct* known_integral_coordinates,
+        const DiagnosticsContext* diagnostics) noexcept {
+    const Order* order = base.parent();
+    if (order == nullptr || deficit.deficit <= 0 ||
+        deficit.norm_vp < deficit.deficit) {
+        return DirectLargePrimeStatus::unsupported;
+    }
+    OrderElement integral_generator(*order);
+    if (!integral_generator.is_defined() ||
+        !(known_integral_coordinates == nullptr
+                  ? integral_generator.set_element(generator)
+                  : integral_generator.set_coordinates(flint::FmpzMatConstRef(
+                            known_integral_coordinates)))) {
+        return DirectLargePrimeStatus::unsupported;
+    }
+
+    PrimeIdealList decomposed;
+    {
+        SILEX_PROFILE_SCOPE(
+                diagnostics, DiagnosticsModule::class_group,
+                "class_group.partial_relation_smooth_norm_decompose");
+        if (!decompose_prime(decomposed, *order,
+                             flint::FmpzConstRef(deficit.p))) {
+            return DirectLargePrimeStatus::unsupported;
+        }
+    }
+    for (slong j = 0; j < decomposed.size(); ++j) {
+        const PrimeIdeal* prime = decomposed.at(j);
+        if (prime == nullptr || prime->residue_degree() <= 0) {
+            return DirectLargePrimeStatus::unsupported;
+        }
+        // f(P/p) v_P(alpha) is at most the deficit for P outside the base,
+        // so a larger residue degree forces v_P(alpha) = 0.
+        if (prime->residue_degree() > deficit.deficit ||
+            base.index(*prime) >= 0) {
+            continue;
+        }
+        slong valuation = -1;
+        if (!detail::PrimeIdealAccess::prime_ideal_valuation_with_norm_vp(
+                    valuation, *prime, integral_generator, deficit.norm_vp,
+                    diagnostics) ||
+            valuation < 0) {
+            return DirectLargePrimeStatus::unsupported;
+        }
+        if (valuation == 0) {
+            continue;
+        }
+        // The first prime outside the base dividing alpha.  If it leaves
+        // part of the deficit, another prime outside the base divides
+        // alpha; the full factorization rejects both that and an exponent
+        // other than 1.
+        if (valuation != 1 || prime->residue_degree() != deficit.deficit) {
+            return DirectLargePrimeStatus::no_candidate;
+        }
+        if (!out_prime.set(*prime)) {
+            return DirectLargePrimeStatus::unsupported;
+        }
+        return DirectLargePrimeStatus::found;
+    }
+    // A deficit no prime outside the base accounts for contradicts the
+    // norm identity; leave it to the full factorization.
+    return DirectLargePrimeStatus::unsupported;
 }
 
 bool row_module_add_with_result(RowModuleAddResult& result,
@@ -5308,6 +5464,40 @@ bool DirectPartialRelationTestEntry::row(
                    nullptr, word_size_residues, deduce_last_hit_valuation,
                    deduced_hit_valuations) ==
            DirectLargePrimeStatus::found;
+}
+
+bool DirectPartialRelationTestEntry::smooth_norm_row(
+        SmoothNormOutcome& outcome,
+        flint::FmpzMat& out_row,
+        PrimeIdeal& out_prime,
+        const Element& generator,
+        const FactorBase& base,
+        flint::FmpzConstRef factor_base_bound) noexcept {
+    outcome = SmoothNormOutcome::fallback;
+    flint::Fmpz rational_large_prime;
+    flint::FmpzPoly residue_key;
+    std::vector<DirectPartialResidueBlockCacheEntry> residue_block_cache;
+    DirectSmoothNormDeficit deficit;
+    const DirectLargePrimeStatus status = direct_partial_relation_row(
+            out_row, rational_large_prime, residue_key, generator, base,
+            factor_base_bound, nullptr, nullptr, nullptr,
+            residue_block_cache, nullptr, true, true, nullptr, &deficit);
+    if (status == DirectLargePrimeStatus::smooth_discard) {
+        outcome = SmoothNormOutcome::discard;
+        return true;
+    }
+    if (status != DirectLargePrimeStatus::smooth_deficit) {
+        return true;
+    }
+    const DirectLargePrimeStatus prime_status =
+            direct_smooth_norm_large_prime(out_prime, generator, base,
+                                           deficit, nullptr, nullptr);
+    if (prime_status == DirectLargePrimeStatus::found) {
+        outcome = SmoothNormOutcome::found;
+    } else if (prime_status == DirectLargePrimeStatus::no_candidate) {
+        outcome = SmoothNormOutcome::discard;
+    }
+    return true;
 }
 
 }  // namespace detail
@@ -12805,12 +12995,65 @@ bool ClassGroupContext::try_partial_relation_(
         // If this source-shaped screen cannot identify a unique degree-one
         // prime, the exact C-compatible factorization path below remains
         // authoritative.
+        DirectSmoothNormDeficit smooth_deficit;
         DirectLargePrimeStatus status = direct_partial_relation_row(
                 partial_row, rational_large_prime, residue_key, generator,
                 base_, flint::FmpzConstRef(factor_base_build_bound_),
                 known_norm, known_integral_coordinates,
                 known_integral_polynomial,
-                partial_state.direct_partial_residue_blocks, diagnostics_);
+                partial_state.direct_partial_residue_blocks, diagnostics_,
+                true, true, nullptr, &smooth_deficit);
+        // A norm smooth over the base's rational primes: the full
+        // factorization below would keep a partial relation only for one
+        // prime ideal outside the base with exponent 1, which must lie over
+        // the one rational prime whose base-prime valuations leave a norm
+        // deficit.  Decompose only that prime; any status other than found
+        // or no_candidate leaves the decision to the full factorization.
+        if (status == DirectLargePrimeStatus::smooth_discard) {
+            SILEX_PROFILE_EVENT(
+                    diagnostics_, DiagnosticsModule::class_group,
+                    "class_group.partial_relation_smooth_norm_no_candidate");
+            return true;
+        }
+        if (status == DirectLargePrimeStatus::smooth_deficit) {
+            SILEX_PROFILE_SCOPE(
+                    diagnostics_, DiagnosticsModule::class_group,
+                    "class_group.partial_relation_smooth_norm");
+            const DirectLargePrimeStatus smooth_status =
+                    direct_smooth_norm_large_prime(
+                            large_prime, generator, base_, smooth_deficit,
+                            known_integral_coordinates, diagnostics_);
+            if (smooth_status == DirectLargePrimeStatus::no_candidate) {
+                SILEX_PROFILE_EVENT(
+                        diagnostics_, DiagnosticsModule::class_group,
+                        "class_group.partial_relation_smooth_norm_no_candidate");
+                return true;
+            }
+            if (smooth_status == DirectLargePrimeStatus::found) {
+                flint::Fmpz large_norm;
+                flint::Fmpz norm_bound;
+                flint::fmpz_mul(flint::FmpzRef(norm_bound),
+                                flint::FmpzConstRef(factor_base_build_bound_),
+                                flint::FmpzConstRef(factor_base_build_bound_));
+                if (!large_prime.norm(flint::FmpzRef(large_norm)) ||
+                    flint::fmpz_cmp(flint::FmpzConstRef(large_norm),
+                                    flint::FmpzConstRef(norm_bound)) > 0) {
+                    SILEX_PROFILE_EVENT(
+                            diagnostics_, DiagnosticsModule::class_group,
+                            "class_group.partial_relation_smooth_norm_large_prime_out_of_bound");
+                    return true;
+                }
+                SILEX_PROFILE_EVENT(
+                        diagnostics_, DiagnosticsModule::class_group,
+                        "class_group.partial_relation_smooth_norm_found");
+                have_large_prime = true;
+                have_partial_row = true;
+                return match_or_store_large_prime();
+            }
+            SILEX_PROFILE_EVENT(
+                    diagnostics_, DiagnosticsModule::class_group,
+                    "class_group.partial_relation_smooth_norm_fallback");
+        }
         if (status == DirectLargePrimeStatus::found) {
             SILEX_PROFILE_EVENT(
                     diagnostics_, DiagnosticsModule::class_group,

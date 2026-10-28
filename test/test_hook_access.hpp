@@ -678,6 +678,21 @@ public:
                 deduced_hit_valuations);
     }
 
+    // The smooth-norm partial relation route (see
+    // DirectPartialRelationTestEntry::smooth_norm_row).
+    using SmoothNormOutcome = DirectPartialRelationTestEntry::SmoothNormOutcome;
+    static bool smooth_norm_partial_row(
+            SmoothNormOutcome& outcome,
+            flint::FmpzMat& out_row,
+            PrimeIdeal& out_prime,
+            const Element& generator,
+            const FactorBase& base,
+            flint::FmpzConstRef factor_base_bound) noexcept {
+        return DirectPartialRelationTestEntry::smooth_norm_row(
+                outcome, out_row, out_prime, generator, base,
+                factor_base_bound);
+    }
+
     // Factor-base honesty scan call counters (the test-only counters in
     // relation_search::FactorBaseHonestyCallCounts): the scans started per
     // route and escalation mode since the last reset.

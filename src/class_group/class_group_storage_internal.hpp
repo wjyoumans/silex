@@ -199,6 +199,30 @@ class DirectPartialRelationTestEntry {
             bool word_size_residues = true,
             bool deduce_last_hit_valuation = true,
             slong* deduced_hit_valuations = nullptr) noexcept;
+
+    // The outcome of the smooth-norm partial relation route (a norm smooth
+    // over the base's rational primes): `found` is one prime ideal outside
+    // the base with exponent 1, `discard` is no such single prime, and
+    // `fallback` leaves the decision to the full ideal factorization (also
+    // any norm that is not smooth).
+    enum class SmoothNormOutcome {
+        found,
+        discard,
+        fallback,
+    };
+
+    // Test hook: runs the smooth-norm route of the partial relation search
+    // on `generator` over `base` with a fresh residue-block cache.  On
+    // `found` writes the base-prime row and the prime ideal outside the
+    // base; the caller's large-prime norm bound is not applied.  For tests
+    // only.
+    static bool smooth_norm_row(
+            SmoothNormOutcome& outcome,
+            flint::FmpzMat& out_row,
+            PrimeIdeal& out_prime,
+            const Element& generator,
+            const FactorBase& base,
+            flint::FmpzConstRef factor_base_bound) noexcept;
 };
 
 struct FactorBaseGenerationRecord {
