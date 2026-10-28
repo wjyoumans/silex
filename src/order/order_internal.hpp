@@ -214,6 +214,34 @@ public:
             slong index,
             flint::FmpzPoly&& charpoly,
             flint::Fmpz&& discriminant) noexcept;
+
+    // Sets `out` to the residue degrees above the rational prime p last
+    // stored for this order data by
+    // store_defining_polynomial_residue_degrees, in the order they were
+    // stored, and returns true; returns false, leaving `out` unchanged,
+    // when none are stored for p.  The zeta defining-polynomial route
+    // (bf_residue_degrees_from_equation_order_nmod in zeta.cpp) stores the
+    // degrees it reads from the distinct-degree factorization of the
+    // field's defining polynomial modulo p, so that the GRH factor-base
+    // bound, the norm-bounded factor-base build and the Belabas-Friedman
+    // sums over one order factor each p once.  The degrees depend only on
+    // the parent field's polynomial and p, which never change for one
+    // order data; that route asks only for primes its own gate admits
+    // (p divides neither the order discriminant nor the equation-order
+    // index), so index divisors are never stored here.  Kept in the order's
+    // shared data in the same unsynchronized way as the equation order
+    // index; Order::set, set_basis and the factories start with nothing
+    // stored.  False when `order` has no basis.
+    static bool defining_polynomial_residue_degrees(std::vector<slong>& out,
+                                                    const Order& order,
+                                                    ulong p) noexcept;
+
+    // Stores `degrees` (nonempty) as the residue degrees above p, unless
+    // some are already stored for p.  Silent when `order` has no basis.
+    static void store_defining_polynomial_residue_degrees(
+            const Order& order,
+            ulong p,
+            const std::vector<slong>& degrees) noexcept;
 };
 
 }  // namespace silex::detail

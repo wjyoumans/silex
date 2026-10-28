@@ -60,7 +60,10 @@ public:
     // and returns true when the route applies to p.  Returns false when
     // init has not succeeded, the gate rejects p, or the computation
     // fails; out is then unspecified.  `order` must be the order init was
-    // called with.
+    // called with.  Degrees from a distinct-degree factorization are kept in
+    // the order data (OrderAccess::defining_polynomial_residue_degrees,
+    // order/order_internal.hpp), where every route object and every
+    // Belabas-Friedman evaluation over the same order data reads them.
     bool residue_degrees(std::vector<slong>& out,
                          const Order& order,
                          ulong p) noexcept;

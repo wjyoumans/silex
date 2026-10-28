@@ -29,6 +29,8 @@
 #include <silex/ideal.hpp>
 #include <silex/order_element.hpp>
 
+#include <algorithm>
+#include <cstddef>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -87,6 +89,20 @@ struct OrderData {
     // so a stored entry never moves.
     mutable std::vector<std::unique_ptr<BasisElementCharpoly>>
             basis_element_charpolys_;
+    // Residue degrees above rational primes read from the defining
+    // polynomial, filled through
+    // OrderAccess::store_defining_polynomial_residue_degrees (they depend
+    // only on the parent field, like the index above).  Entries are sorted
+    // by p; entry k holds the degrees
+    // defining_polynomial_residue_degrees_[offset, offset + length).
+    struct DefiningPolynomialResidueDegreeEntry {
+        ulong p = 0;
+        std::size_t offset = 0;
+        std::size_t length = 0;
+    };
+    mutable std::vector<DefiningPolynomialResidueDegreeEntry>
+            defining_polynomial_residue_degree_entries_;
+    mutable std::vector<slong> defining_polynomial_residue_degrees_;
     bool maximality_is_known_ = false;
     bool maximal_ = false;
     OrderSpecialization specialization_;
@@ -1700,6 +1716,64 @@ const BasisElementCharpoly* OrderAccess::store_basis_element_charpoly(
     const BasisElementCharpoly* stored = entry.get();
     order.data_->basis_element_charpolys_.push_back(std::move(entry));
     return stored;
+}
+
+namespace {
+
+using DefiningPolynomialResidueDegreeEntries = std::vector<
+        OrderData::DefiningPolynomialResidueDegreeEntry>;
+
+DefiningPolynomialResidueDegreeEntries::const_iterator
+defining_polynomial_residue_degree_entry(
+        const DefiningPolynomialResidueDegreeEntries& entries,
+        ulong p) noexcept {
+    return std::lower_bound(
+            entries.begin(), entries.end(), p,
+            [](const OrderData::DefiningPolynomialResidueDegreeEntry& entry,
+               ulong prime) { return entry.p < prime; });
+}
+
+}  // namespace
+
+bool OrderAccess::defining_polynomial_residue_degrees(
+        std::vector<slong>& out,
+        const Order& order,
+        ulong p) noexcept {
+    if (!order.has_basis()) {
+        return false;
+    }
+    const OrderData& data = *order.data_;
+    const auto entry = defining_polynomial_residue_degree_entry(
+            data.defining_polynomial_residue_degree_entries_, p);
+    if (entry == data.defining_polynomial_residue_degree_entries_.end() ||
+        entry->p != p) {
+        return false;
+    }
+    const auto first = data.defining_polynomial_residue_degrees_.begin() +
+                       static_cast<std::ptrdiff_t>(entry->offset);
+    out.assign(first, first + static_cast<std::ptrdiff_t>(entry->length));
+    return true;
+}
+
+void OrderAccess::store_defining_polynomial_residue_degrees(
+        const Order& order,
+        ulong p,
+        const std::vector<slong>& degrees) noexcept {
+    if (!order.has_basis() || degrees.empty()) {
+        return;
+    }
+    OrderData& data = *order.data_;
+    auto& entries = data.defining_polynomial_residue_degree_entries_;
+    const auto entry = defining_polynomial_residue_degree_entry(entries, p);
+    if (entry != entries.end() && entry->p == p) {
+        return;
+    }
+    const std::size_t offset = data.defining_polynomial_residue_degrees_.size();
+    data.defining_polynomial_residue_degrees_.insert(
+            data.defining_polynomial_residue_degrees_.end(), degrees.begin(),
+            degrees.end());
+    entries.insert(entry, OrderData::DefiningPolynomialResidueDegreeEntry{
+                                  p, offset, degrees.size()});
 }
 
 }  // namespace detail

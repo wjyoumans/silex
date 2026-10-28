@@ -1,3 +1,5 @@
+#include <flint/ulong_extras.h>
+
 #include <silex/factor_base.hpp>
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/flint/fmpz.hpp>
@@ -5,6 +7,7 @@
 #include <silex/order.hpp>
 
 #include "factor_base/factor_base_internal.hpp"
+#include "order/order_internal.hpp"
 #include "prime_ideal/prime_ideal_internal.hpp"
 #include "test_hook_access.hpp"
 #include "test_support.hpp"
@@ -787,6 +790,119 @@ int test_norm_bounded_build_skips_primes_over_the_bound() {
     return 0;
 }
 
+// The defining-polynomial route keeps the residue degrees of each prime it
+// factors in the order data, so every route object and every phase over one
+// order (the GRH factor-base bound search, the norm-bounded build, the
+// Belabas-Friedman sums) factors p once.  Q(2^(1/4)) from x^4 - 2
+// (Eisenstein at 2, so Z[2^(1/4)] is maximal; discriminant -2^11): modulo
+// 3 the polynomial is (x^2 + x + 2)(x^2 + 2x + 2), modulo 5 it is
+// irreducible (2 has order 4 in F_5^*), and modulo 7 it is
+// (x - 2)(x - 5)(x^2 + 4).  The discriminant divisor 2 fails the route's
+// gate and is never stored.
+int test_defining_polynomial_residue_degrees_shared_by_order() {
+    const slong coefficients[] = {-2, 0, 0, 0, 1};
+    silex::NumberField quartic = monic_field(coefficients, 4);
+    silex::Order equation = silex::test::equation_order(quartic);
+    silex::Order maximal(quartic);
+    assert(maximal.maximal_order(equation));
+    std::vector<slong> stored;
+    for (const ulong p : {UWORD(2), UWORD(3), UWORD(5), UWORD(7)}) {
+        assert(!silex::detail::OrderAccess::
+                       defining_polynomial_residue_degrees(stored, maximal,
+                                                           p));
+    }
+
+    silex::detail::DefiningPolynomialResidueDegrees route;
+    assert(route.init(maximal));
+    std::vector<slong> degrees;
+    assert(!route.residue_degrees(degrees, maximal, 2));
+    const std::vector<std::vector<slong>> expected = {{2, 2}, {4}, {1, 1, 2}};
+    const ulong primes[] = {3, 5, 7};
+    // 7 first: entries stay keyed by p whatever the order they arrive in.
+    for (const std::size_t i : {std::size_t{2}, std::size_t{0},
+                                std::size_t{1}}) {
+        assert(route.residue_degrees(degrees, maximal, primes[i]));
+        assert(degrees == expected[i]);
+    }
+
+    // A copy shares the order data; a second route object reads the stored
+    // degrees (the same values as a fresh factorization over a new order).
+    const silex::Order copy = maximal;
+    silex::detail::DefiningPolynomialResidueDegrees second;
+    assert(second.init(copy));
+    for (std::size_t i = 0; i < 3; ++i) {
+        stored.clear();
+        assert(silex::detail::OrderAccess::
+                       defining_polynomial_residue_degrees(stored, copy,
+                                                           primes[i]));
+        assert(stored == expected[i]);
+        assert(second.residue_degrees(degrees, copy, primes[i]));
+        assert(degrees == expected[i]);
+    }
+    assert(!silex::detail::OrderAccess::defining_polynomial_residue_degrees(
+            stored, maximal, 2));
+    assert(!silex::detail::OrderAccess::defining_polynomial_residue_degrees(
+            stored, maximal, 11));
+
+    // A second store for p keeps the first entry.
+    silex::detail::OrderAccess::store_defining_polynomial_residue_degrees(
+            maximal, 3, std::vector<slong>{4});
+    assert(silex::detail::OrderAccess::defining_polynomial_residue_degrees(
+            stored, maximal, 3));
+    assert(stored == expected[0]);
+
+    // Order::set and a fresh maximal order start with nothing stored, and
+    // factor to the same degrees.
+    silex::Order reset;
+    assert(reset.set(maximal));
+    silex::Order fresh(quartic);
+    assert(fresh.maximal_order(equation));
+    for (const silex::Order* other : {&reset, &fresh}) {
+        assert(!silex::detail::OrderAccess::
+                       defining_polynomial_residue_degrees(stored, *other,
+                                                           3));
+        silex::detail::DefiningPolynomialResidueDegrees other_route;
+        assert(other_route.init(*other));
+        for (std::size_t i = 0; i < 3; ++i) {
+            assert(other_route.residue_degrees(degrees, *other, primes[i]));
+            assert(degrees == expected[i]);
+        }
+    }
+
+    // The GRH factor-base bound search stores, in the order data it
+    // searches, the degrees of the primes below its bound that the route
+    // factors.  A degree-12 field (discriminant about 10^15; random_d12 of
+    // the class-unit corpus), whose search ends well above 2.
+    const slong twelve[] = {1, 0, -2, 0, 2, 1, 1, 1, 2, -1, 0, -1, 1};
+    silex::NumberField dodecic = monic_field(twelve, 12);
+    silex::Order dodecic_equation = silex::test::equation_order(dodecic);
+    silex::Order searched(dodecic);
+    assert(searched.maximal_order(dodecic_equation));
+    sflint::Fmpz bound;
+    assert(silex::detail::grh_bdf_factor_base_bound_search(
+                   sflint::FmpzRef(bound), searched, nullptr, nullptr,
+                   nullptr) == silex::detail::BdfSearchOutcome::found);
+    assert(sflint::fmpz_cmp_ui(sflint::FmpzConstRef(bound), 16) > 0);
+    silex::Order unsearched(dodecic);
+    assert(unsearched.maximal_order(dodecic_equation));
+    silex::detail::DefiningPolynomialResidueDegrees reference;
+    assert(reference.init(unsearched));
+    slong stored_count = 0;
+    for (ulong p = 2; sflint::fmpz_cmp_ui(sflint::FmpzConstRef(bound), p) > 0;
+         p = n_nextprime(p, 1)) {
+        stored.clear();
+        if (!silex::detail::OrderAccess::defining_polynomial_residue_degrees(
+                    stored, searched, p)) {
+            continue;
+        }
+        ++stored_count;
+        assert(reference.residue_degrees(degrees, unsearched, p));
+        assert(stored == degrees);
+    }
+    assert(stored_count > 0);
+    return 0;
+}
+
 // equal() answers copies from a shared identity and everything else from the
 // element-wise comparison; both must give the same answer.
 int test_equal_copies_and_independent_builds() {
@@ -1183,6 +1299,7 @@ int main() {
     assert(test_lll_relation_base_from_norm_bounded() == 0);
     assert(test_norm_bounded_build_with_decomposition_cache() == 0);
     assert(test_norm_bounded_build_skips_primes_over_the_bound() == 0);
+    assert(test_defining_polynomial_residue_degrees_shared_by_order() == 0);
     assert(test_equal_copies_and_independent_builds() == 0);
     assert(test_class_group_bound() == 0);
     assert(test_failure_preserves_output() == 0);

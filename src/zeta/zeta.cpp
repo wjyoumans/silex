@@ -1,6 +1,7 @@
 #include <silex/zeta.hpp>
 
 #include "zeta_internal.hpp"
+#include "../order/order_internal.hpp"
 #include "../prime_ideal/prime_ideal_internal.hpp"
 #include "../unit/unit_internal.hpp"
 #include "../residue_field/word_frobenius_internal.hpp"
@@ -2085,6 +2086,20 @@ bool bf_residue_degrees_from_equation_order_nmod(
         return false;
     }
 
+    // The degrees depend only on the defining polynomial and p, so each
+    // order data keeps those of the distinct-degree factorization below
+    // (OrderAccess::defining_polynomial_residue_degrees): the GRH
+    // factor-base bound, the norm-bounded factor-base build and the
+    // Belabas-Friedman sums over one order then factor each p once.  The
+    // root count of degrees 1 to 3 is not stored.  Every caller has passed
+    // the route's gate for p
+    // (bf_residue_degree_context_uses_defining_polynomial), and `context`
+    // was set up from `order` (bf_init_residue_degree_context).
+    if (detail::OrderAccess::defining_polynomial_residue_degrees(
+                out, order, modulus)) {
+        return true;
+    }
+
     flint::NmodPoly reduced(modulus);
     if (!bf_reduce_defining_polynomial_nmod(reduced, context, modulus,
                                             diagnostics)) {
@@ -2128,7 +2143,12 @@ bool bf_residue_degrees_from_equation_order_nmod(
         }
     }
 
-    return !out.empty();
+    if (out.empty()) {
+        return false;
+    }
+    detail::OrderAccess::store_defining_polynomial_residue_degrees(
+            order, modulus, out);
+    return true;
 }
 
 bool bf_init_residue_degree_context(
