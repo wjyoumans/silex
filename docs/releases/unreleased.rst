@@ -167,6 +167,20 @@ Changed
   the 161 ``proven`` rows under the 20 s cap no row rises by more than
   0.03% and the largest drop is 5.48% (``multiquadratic_m1_m3_p5``).
 
+- ``ClassGroupContext::publish_presentation`` republishes into the storage
+  of the presentation that the last relation append discarded, and takes
+  the relation rows and basis it forms instead of copying them.  When the
+  Hermite normal form basis of the relation lattice is unchanged, only the
+  relation rows are replaced: the Smith form, transforms and invariants
+  depend on the basis alone.  The published presentation and every failure
+  case are unchanged.  ``grh`` outputs (171 corpus rows) and ``proven``
+  outputs (166 rows), with timing keys removed, are identical; the rows
+  that time out do so on both builds.  Whole-process callgrind Ir of
+  ``grh`` against main commit 6dd17810 drops by 9.12% on
+  ``simplest_cubic_a12`` (115.38M to 104.86M) and 3.58% summed over eight
+  small degree 2 and 3 rows (563.12M to 542.94M); every one of those rows
+  is down.
+
 - ``Ideal::add`` stores the Hermite normal form of the sum of two ideals of
   one order without the closure test that multiplies every pair of basis
   elements: a sum of ideals is an ideal, so the test cannot fail there.
