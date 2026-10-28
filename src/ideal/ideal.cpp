@@ -1755,6 +1755,85 @@ bool try_ideal_product_hnf(flint::FmpzMatRef out, const Ideal& left,
     return true;
 }
 
+bool ideal_two_generator_form(IdealTwoGeneratorForm& out, const Ideal& ideal,
+                              const TwoGeneratorSearchOptions& options,
+                              TwoGeneratorSearchReport* output_report) noexcept {
+    TwoGeneratorSearchReport report;
+    if (output_report != nullptr) *output_report = report;
+    const Order* parent = ideal.parent();
+    if (parent == nullptr || !ideal.has_hnf() || !parent->is_maximal() ||
+        options.random_trials < 0 || options.random_trials > 32) return false;
+    Order order(*parent);
+    const slong n = order.degree();
+    flint::FmpzMat h(n, n), k(n, n), one_coordinates(1, n), row(1, n), matrix(n, n);
+    flint::Fmpz content, minimum;
+    OrderElement one(order);
+    if (!ideal.get_hnf(flint::FmpzMatRef(h)) || scalar_hnf(flint::FmpzMatConstRef(h)) ||
+        !one.one() || !one.get_coordinates(flint::FmpzMatRef(one_coordinates))) return false;
+    // The extraction try_ideal_product_hnf runs on its factor k: the primitive
+    // part of the HNF and its minimum.
+    fmpz_mat_set(k.raw(), h.raw());
+    primitive_hnf(k, content);
+    if (!ideal_minimum(minimum, flint::FmpzMatConstRef(one_coordinates),
+                       flint::FmpzMatConstRef(k))) return false;
+    const bool found = extract_two_generator(row, matrix, order,
+            flint::FmpzMatConstRef(k), minimum, options, report);
+    if (output_report != nullptr) *output_report = report;
+    if (!found) return false;
+    out.hnf.swap(h);
+    out.content.swap(content);
+    out.minimum.swap(minimum);
+    out.multiplication.swap(matrix);
+    return true;
+}
+
+bool try_ideal_product_hnf_with_form(flint::FmpzMatRef out, const Ideal& left,
+                                     const Ideal& right,
+                                     const IdealTwoGeneratorForm& right_form) noexcept {
+    const Order* parent = left.parent();
+    if (parent == nullptr || right.parent() == nullptr ||
+        !parent->has_same_data(*right.parent()) || !left.has_hnf() || !right.has_hnf() ||
+        !fmpz_mat_shape(out, parent->degree(), parent->degree())) return false;
+    const slong n = parent->degree();
+    flint::FmpzMat h(n, n), k(n, n);
+    if (!left.get_hnf(flint::FmpzMatRef(h)) || !right.get_hnf(flint::FmpzMatRef(k)) ||
+        !fmpz_mat_shape(flint::FmpzMatConstRef(right_form.hnf), n, n) ||
+        !fmpz_mat_shape(flint::FmpzMatConstRef(right_form.multiplication), n, n) ||
+        !fmpz_mat_equal(k.raw(), right_form.hnf.raw())) return false;
+    // The branches of try_ideal_product_hnf that do not search for a
+    // two-element form are taken as they are.
+    if (scalar_hnf(flint::FmpzMatConstRef(h)) || scalar_hnf(flint::FmpzMatConstRef(k)) ||
+        left.known_principal_generator() != nullptr ||
+        right.known_principal_generator() != nullptr) {
+        return try_ideal_product_hnf(out, left, right);
+    }
+    if (!parent->is_maximal()) return false;
+    flint::Fmpz ch, mh;
+    primitive_hnf(h, ch);
+    flint::FmpzMat one_coordinates(1, n);
+    OrderElement one(*parent);
+    if (!one.one() || !one.get_coordinates(flint::FmpzMatRef(one_coordinates)) ||
+        !ideal_minimum(mh, flint::FmpzMatConstRef(one_coordinates), flint::FmpzMatConstRef(h))) return false;
+    // The rows mk H and H M_beta span h (mk O + beta O) = h k for the
+    // primitive parts h of left and k of right, because
+    // ideal_two_generator_form verified k = mk O + beta O, and mh mk lies in
+    // h k: the argument of the generic branch of try_ideal_product_hnf, with
+    // the form of k found once instead of on every product.  The HNF of an
+    // ideal is unique, so this is the HNF that try_ideal_product_hnf returns,
+    // whichever factor it would have searched.
+    flint::FmpzMat rows(2 * n, n);
+    two_generator_rows(rows, flint::FmpzMatConstRef(h), flint::FmpzConstRef(right_form.minimum),
+                       flint::FmpzMatConstRef(right_form.multiplication));
+    flint::Fmpz exponent;
+    fmpz_mul(exponent.raw(), mh.raw(), right_form.minimum.raw());
+    fmpz_mat_hnf_modular_eldiv(rows.raw(), exponent.raw());
+    // The window is taken after the HNF, which may permute row storage.
+    flint::FmpzMatConstWindow top(rows, 0, 0, n, n);
+    fmpz_mul(ch.raw(), ch.raw(), right_form.content.raw());
+    fmpz_mat_scalar_mul_fmpz(out.raw(), top.raw(), ch.raw());
+    return true;
+}
+
 bool basis_product_hnf(flint::FmpzMatRef out, const Ideal& left,
                        const Ideal& right) noexcept {
     const Order* parent = left.parent();
@@ -2240,6 +2319,37 @@ bool IdealAccess::multiply_two_generator(
 
     out.swap(candidate);
     return true;
+}
+
+// Ideal::multiply(left, right) on a maximal order takes the HNF from
+// try_ideal_product_hnf and stores it with set_hnf_direct.  This takes the
+// same HNF from try_ideal_product_hnf_with_form, which skips the two-element
+// search, and stores it the same way.  The HNF of an ideal is unique, so the
+// stored ideal and its cached state (no norm, no principal generator) are
+// those Ideal::multiply would store.  The O factors, nonmaximal orders and
+// any failure of the form route go to Ideal::multiply itself.
+bool IdealAccess::multiply_two_generator_form(
+        Ideal& out,
+        const Ideal& left,
+        const Ideal& right,
+        const IdealTwoGeneratorForm& right_form) noexcept {
+    if (out.is_defined() && left.is_defined() && right.is_defined() &&
+        out.parent_.has_same_data(left.parent_) &&
+        left.parent_.has_same_data(right.parent_) && left.has_hnf_ &&
+        right.has_hnf_ && out.parent_.is_maximal() && !left.is_one() &&
+        !right.is_one()) {
+        const slong n = out.parent_.degree();
+        flint::FmpzMat hnf(n, n);
+        if (try_ideal_product_hnf_with_form(flint::FmpzMatRef(hnf), left,
+                                            right, right_form)) {
+            Ideal candidate(out.parent_);
+            if (candidate.set_hnf_direct(flint::FmpzMatConstRef(hnf))) {
+                out.swap(candidate);
+                return true;
+            }
+        }
+    }
+    return out.multiply(left, right);
 }
 
 bool IdealAccess::multiply_by_element(

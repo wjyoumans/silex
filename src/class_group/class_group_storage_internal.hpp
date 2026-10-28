@@ -16,6 +16,7 @@
 #include "relation_completion_scheduler_internal.hpp"
 #include "relation_search_budget_internal.hpp"
 #include "../factor_base/generation_different_route_internal.hpp"
+#include "../ideal/two_generator_internal.hpp"
 
 #include <cstdint>
 #include <optional>
@@ -275,6 +276,17 @@ struct RelationAdmissionCache {
     std::vector<ulong> relation_row_hashes;
 };
 
+// The two-element form of one factor-base prime P, found once for the
+// random-product relation search (multiply_by_factor_base_prime) and reused
+// by every later product with P.  `key` is the HNF of the ideal it was built
+// for; has_form is false when ideal_two_generator_form found none (the
+// products then use Ideal::multiply).
+struct RandomProductPrimeForm {
+    flint::FmpzMat key{0, 0};
+    bool has_form = false;
+    IdealTwoGeneratorForm form;
+};
+
 struct RelationSearchControlState {
     RelationCompletionState completion;
     slong checkpoint_relation_count = -1;
@@ -315,6 +327,11 @@ struct RelationSearchControlState {
     // finish state.
     EmbeddingContext analytic_finish_embeddings;
     slong analytic_finish_embedding_precision = 0;
+    // Entry i holds the two-element form of factor-base prime i for the
+    // random-product search, kept across its calls for the route's lifetime.
+    // An entry whose key differs from the prime now at i (after a factor-base
+    // rebuild) is rebuilt.
+    std::vector<RandomProductPrimeForm> random_product_prime_forms;
 };
 
 struct RelationFinishState {

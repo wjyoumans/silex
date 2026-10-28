@@ -163,4 +163,19 @@ ulong relation_search_phase_seed(const ClassGroupContext& context,
 
 ulong next_relation_random_exponent(ulong& state) noexcept;
 
+// Sets out = input * P for the factor-base prime P at `index`, whose
+// integral ideal is prime_ideal, as out.multiply(input, prime_ideal) does:
+// the same ideal (the HNF is unique) and the same stored state.  The
+// two-element form of P that Ideal::multiply would search for is found once
+// and kept in forms[index], which is rebuilt when its key is not
+// prime_ideal's HNF; detail::multiply_integral_ideal_by_two_generator_form
+// then forms the product.  A prime without a form (a scalar ideal, or an
+// exhausted search) uses out.multiply.
+bool multiply_by_factor_base_prime(
+        Ideal& out,
+        const Ideal& input,
+        const Ideal& prime_ideal,
+        slong index,
+        std::vector<RandomProductPrimeForm>& forms) noexcept;
+
 }  // namespace silex::detail::relation_search

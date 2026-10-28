@@ -5,10 +5,13 @@
 
 #include "class_group/class_group_internal.hpp"
 #include "class_group/lll_relation_search_internal.hpp"
+#include "class_group/relation_search_internal.hpp"
+#include "ideal/two_generator_internal.hpp"
 #include "test_support.hpp"
 
 #include <cassert>
 #include <cstring>
+#include <vector>
 
 namespace {
 namespace sflint = silex::flint;
@@ -254,6 +257,135 @@ int test_random_product_row_is_exact() {
     return 0;
 }
 
+bool ideal_hnf_equal(const silex::Ideal& left,
+                     const silex::Ideal& right) noexcept {
+    const slong n = left.degree();
+    sflint::FmpzMat left_hnf(n, n);
+    sflint::FmpzMat right_hnf(n, n);
+    return left.get_hnf(sflint::FmpzMatRef(left_hnf)) &&
+           right.get_hnf(sflint::FmpzMatRef(right_hnf)) &&
+           sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(left_hnf),
+                                  sflint::FmpzMatConstRef(right_hnf));
+}
+
+// The random-product search multiplies by a factor-base prime through
+// multiply_by_factor_base_prime, which finds the prime's two-element form
+// once and reuses it.  Its product must be the HNF Ideal::multiply gives,
+// whichever factor Ideal::multiply would search.  Dedekind's cubic
+// x^3 - x^2 - 2x - 8 has 2 as a common index divisor: 2 splits into three
+// primes of norm 2, none with a Kummer generator, so their forms come from
+// the search alone.  Inputs include O, every prime, products whose minimum
+// (2) is below the prime's, and a square of a prime above 2.
+int test_factor_base_prime_form_product_matches_ideal_multiply() {
+    sflint::FmpqPoly polynomial;
+    sflint::fmpq_poly_zero(polynomial);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 0, -8);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 1, -2);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 2, -1);
+    sflint::fmpq_poly_set_coeff_si(polynomial, 3, 1);
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpqPolyConstRef(polynomial));
+    silex::Order equation_order = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation_order));
+
+    std::vector<silex::PrimeIdeal> primes;
+    std::vector<silex::Ideal> prime_ideals;
+    for (slong p : {WORD(2), WORD(3), WORD(5), WORD(7), WORD(11),
+                    WORD(13)}) {
+        sflint::Fmpz rational_prime;
+        set_si(rational_prime, p);
+        silex::PrimeIdealList factors;
+        assert(silex::decompose_prime(
+                factors, order, sflint::FmpzConstRef(rational_prime)));
+        for (slong i = 0; i < factors.size(); ++i) {
+            assert(factors.at(i) != nullptr);
+            primes.emplace_back(order);
+            assert(primes.back().set(*factors.at(i)));
+            prime_ideals.emplace_back(order);
+            assert(primes.back().get_ideal(prime_ideals.back()));
+        }
+    }
+    // The three primes above 2 come first.
+    assert(prime_ideals.size() > 3);
+    sflint::FmpzMat coordinates(1, order.degree());
+    for (std::size_t i = 0; i < 3; ++i) {
+        sflint::Fmpz p;
+        assert(primes.at(i).rational_prime(sflint::FmpzRef(p)));
+        assert(sflint::fmpz_equal_si(sflint::FmpzConstRef(p), 2));
+        assert(!primes.at(i).kummer_generator_coordinates(
+                sflint::FmpzMatRef(coordinates)));
+    }
+
+    std::vector<silex::Ideal> inputs;
+    inputs.emplace_back(order);
+    assert(inputs.back().one());
+    for (const silex::Ideal& prime_ideal : prime_ideals) {
+        inputs.emplace_back(order);
+        assert(inputs.back().set(prime_ideal));
+    }
+    inputs.emplace_back(order);
+    assert(inputs.back().multiply(prime_ideals.at(0), prime_ideals.at(1)));
+    inputs.emplace_back(order);
+    assert(inputs.back().multiply(prime_ideals.at(0), prime_ideals.at(0)));
+    silex::Ideal partial(order);
+    assert(partial.multiply(prime_ideals.at(2), prime_ideals.at(3)));
+    inputs.emplace_back(order);
+    assert(inputs.back().multiply(partial, prime_ideals.back()));
+
+    std::vector<silex::detail::RandomProductPrimeForm> forms;
+    slong with_form = 0;
+    for (std::size_t i = 0; i < prime_ideals.size(); ++i) {
+        silex::detail::IdealTwoGeneratorForm form;
+        if (silex::detail::ideal_two_generator_form(form,
+                                                    prime_ideals.at(i))) {
+            ++with_form;
+        }
+        // Twice: the first pass builds forms[i], the second reuses it.
+        for (int pass = 0; pass < 2; ++pass) {
+            for (const silex::Ideal& input : inputs) {
+                silex::Ideal expected(order);
+                silex::Ideal actual(order);
+                assert(expected.multiply(input, prime_ideals.at(i)));
+                assert(silex::detail::relation_search::
+                               multiply_by_factor_base_prime(
+                                       actual, input, prime_ideals.at(i),
+                                       static_cast<slong>(i), forms));
+                assert(actual.equal(expected));
+                assert(ideal_hnf_equal(actual, expected));
+            }
+        }
+        assert(forms.size() == i + 1);
+    }
+    // Every prime above 2 is nonscalar and has a form.
+    for (std::size_t i = 0; i < 3; ++i) {
+        assert(forms.at(i).has_form);
+    }
+    assert(with_form >= 3);
+
+    // Index 0 now holding another prime rebuilds the entry.
+    for (const silex::Ideal& input : inputs) {
+        silex::Ideal expected(order);
+        silex::Ideal actual(order);
+        assert(expected.multiply(input, prime_ideals.at(1)));
+        assert(silex::detail::relation_search::multiply_by_factor_base_prime(
+                actual, input, prime_ideals.at(1), 0, forms));
+        assert(ideal_hnf_equal(actual, expected));
+    }
+    sflint::FmpzMat key(order.degree(), order.degree());
+    assert(prime_ideals.at(1).get_hnf(sflint::FmpzMatRef(key)));
+    assert(sflint::fmpz_mat_equal(sflint::FmpzMatConstRef(key),
+                                  sflint::FmpzMatConstRef(forms.at(0).key)));
+
+    // A form is used only for the ideal it was built for.
+    assert(forms.at(1).has_form);
+    sflint::FmpzMat product(order.degree(), order.degree());
+    assert(!silex::detail::try_ideal_product_hnf_with_form(
+            sflint::FmpzMatRef(product), inputs.at(1), prime_ideals.at(2),
+            forms.at(1).form));
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -262,5 +394,6 @@ int main() {
     assert(test_continuation_witness() == 0);
     assert(test_exhaustion_is_named_and_transactional() == 0);
     assert(test_random_product_row_is_exact() == 0);
+    assert(test_factor_base_prime_form_product_matches_ideal_multiply() == 0);
     return 0;
 }

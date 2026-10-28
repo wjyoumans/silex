@@ -6,6 +6,8 @@
 
 namespace silex::detail {
 
+struct IdealTwoGeneratorForm;
+
 // Noninstalled access to Ideal internals.  set_hnf_direct is for tests only;
 // set_known_ideal_hnf is for library code.
 class IdealAccess {
@@ -69,6 +71,11 @@ public:
     static bool multiply_by_element(
             Ideal& out, const Ideal& ideal, const Element& multiplier,
             const DiagnosticsContext* diagnostics) noexcept;
+    // Implementation of detail::multiply_integral_ideal_by_two_generator_form,
+    // defined in ideal.cpp.
+    static bool multiply_two_generator_form(
+            Ideal& out, const Ideal& left, const Ideal& right,
+            const IdealTwoGeneratorForm& right_form) noexcept;
 
     // Stores `hnf` as the ideal's basis matrix without normalizing it or
     // checking that its row span is an ideal; only the n x n shape is
@@ -152,6 +159,21 @@ inline bool multiply_integral_ideal_by_two_generator(
         const DiagnosticsContext* diagnostics = nullptr) noexcept {
     return IdealAccess::multiply_two_generator(
             out, ideal, scalar_generator, element_generator, diagnostics);
+}
+
+// out = left * right, the ideal and the object state Ideal::multiply gives,
+// with right's two-element form taken from right_form
+// (detail::ideal_two_generator_form(right)) instead of searched for on this
+// call.  Every route of Ideal::multiply that searches nothing, and every
+// failure of the form route, is Ideal::multiply itself.  See the definition
+// in ideal.cpp.
+inline bool multiply_integral_ideal_by_two_generator_form(
+        Ideal& out,
+        const Ideal& left,
+        const Ideal& right,
+        const IdealTwoGeneratorForm& right_form) noexcept {
+    return IdealAccess::multiply_two_generator_form(out, left, right,
+                                                    right_form);
 }
 
 inline bool multiply_integral_ideal_by_element(

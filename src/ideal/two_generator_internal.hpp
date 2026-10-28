@@ -50,6 +50,38 @@ bool try_ideal_product_hnf(flint::FmpzMatRef out,
                            const TwoGeneratorSearchOptions& options = {},
                            TwoGeneratorSearchReport* report = nullptr) noexcept;
 
+// A verified two-element presentation of a nonscalar integral ideal I of a
+// maximal order, the one try_ideal_product_hnf searches for when I is the
+// factor it extracts from: `hnf` is the HNF of I, I = content K with K
+// primitive, K = minimum O + beta O with `minimum` the least positive
+// integer in K, and `multiplication` is the full (unreduced) multiplication
+// matrix of beta.
+struct IdealTwoGeneratorForm {
+    flint::FmpzMat hnf{0, 0};
+    flint::Fmpz content;
+    flint::Fmpz minimum;
+    flint::FmpzMat multiplication{0, 0};
+};
+
+// Runs the search try_ideal_product_hnf runs on a factor (extract_two_generator
+// on the primitive part, with these options) once, so that later products
+// with the ideal can reuse it.  Fails, leaving out unchanged, when the order
+// is not maximal, the ideal is scalar (its products take the scalar branch,
+// which needs no form) or the search is exhausted.
+bool ideal_two_generator_form(IdealTwoGeneratorForm& out, const Ideal& ideal,
+                              const TwoGeneratorSearchOptions& options = {},
+                              TwoGeneratorSearchReport* report = nullptr) noexcept;
+
+// The HNF try_ideal_product_hnf(out, left, right) produces, with the
+// two-element form of right given instead of searched for.  right_form must
+// come from ideal_two_generator_form(right): its stored HNF is compared with
+// right's, and a mismatch fails.  The scalar and principal-generator branches
+// of try_ideal_product_hnf, which search nothing, are taken through it.
+// Leaves out unchanged on failure.
+bool try_ideal_product_hnf_with_form(flint::FmpzMatRef out, const Ideal& left,
+                                     const Ideal& right,
+                                     const IdealTwoGeneratorForm& right_form) noexcept;
+
 // The HNF of the product of two ideals of one order, from the n^2 basis
 // products formed with the order's cached multiplication table and reduced by
 // fmpz_mat_hnf_modular_eldiv modulo the product of the minima of the primitive

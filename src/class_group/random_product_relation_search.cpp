@@ -2,18 +2,56 @@
 
 #include "class_group_internal.hpp"
 
+#include "../ideal/ideal_access_internal.hpp"
+
 #include "ideal_minkowski_embedding_internal.hpp"
 #include "relation_search_driver_internal.hpp"
 #include "relation_completion_scheduler_internal.hpp"
 #include "relation_search_internal.hpp"
 
 #include <cstddef>
+#include <utility>
 #include <vector>
 
 namespace silex::detail::relation_search {
 
 constexpr ulong kRandomRelationPhase = UWORD(6);
 constexpr slong kRandomRelationsPerIdeal = 1;
+
+bool multiply_by_factor_base_prime(
+        Ideal& out,
+        const Ideal& input,
+        const Ideal& prime_ideal,
+        slong index,
+        std::vector<RandomProductPrimeForm>& forms) noexcept {
+    const slong n = prime_ideal.degree();
+    if (index < 0 || n <= 0) {
+        return false;
+    }
+    flint::FmpzMat hnf(n, n);
+    if (!prime_ideal.get_hnf(flint::FmpzMatRef(hnf))) {
+        return false;
+    }
+    const std::size_t position = static_cast<std::size_t>(index);
+    if (forms.size() <= position) {
+        forms.resize(position + 1);
+    }
+    RandomProductPrimeForm& entry = forms[position];
+    if (fmpz_mat_nrows(entry.key.raw()) != n ||
+        fmpz_mat_ncols(entry.key.raw()) != n ||
+        fmpz_mat_equal(entry.key.raw(), hnf.raw()) == 0) {
+        RandomProductPrimeForm rebuilt;
+        rebuilt.has_form =
+                detail::ideal_two_generator_form(rebuilt.form, prime_ideal);
+        rebuilt.key.swap(hnf);
+        entry = std::move(rebuilt);
+    }
+    if (entry.has_form) {
+        return detail::multiply_integral_ideal_by_two_generator_form(
+                out, input, prime_ideal, entry.form);
+    }
+    return out.multiply(input, prime_ideal);
+}
 
 static bool integral_ideal_is_scalar(const Ideal& ideal, bool& scalar) noexcept {
     scalar = false;
@@ -52,7 +90,8 @@ static bool build_random_product_ideal(
         Ideal& factor,
         Ideal& product,
         const FactorBase& base,
-        const SubfactorBaseSchedule& state) noexcept {
+        const SubfactorBaseSchedule& state,
+        std::vector<RandomProductPrimeForm>& forms) noexcept {
     if (state.subfactor_base.empty()) {
         return true;
     }
@@ -79,7 +118,8 @@ static bool build_random_product_ideal(
                 return false;
             }
             for (slong k = 0; k < exponent; ++k) {
-                if (!product.multiply(out, factor)) {
+                if (!multiply_by_factor_base_prime(product, out, factor,
+                                                   index, forms)) {
                     return false;
                 }
                 out.swap(product);
@@ -206,7 +246,8 @@ bool collect_random_relations(
     }
     if (!build_random_product_ideal(
                 random_product, exponents, random_state, prime, factor,
-                random_product_step, *base, subfb_state)) {
+                random_product_step, *base, subfb_state,
+                route_state.random_product_prime_forms)) {
         return false;
     }
 
@@ -218,7 +259,9 @@ bool collect_random_relations(
     auto build_search_ideal = [&](slong index) noexcept {
         return base->prime(pivot_prime, index) &&
                pivot_prime.get_ideal(pivot_ideal) &&
-               search_ideal.multiply(random_product, pivot_ideal);
+               multiply_by_factor_base_prime(
+                       search_ideal, random_product, pivot_ideal, index,
+                       route_state.random_product_prime_forms);
     };
 
     for (slong index : useful) {
