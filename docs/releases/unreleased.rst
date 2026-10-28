@@ -147,7 +147,19 @@ Changed
   6.90% on ``cyclotomic_real_37_deg18`` and 3.62% on
   ``hexadecic_x16_minus_x_minus_1_proven`` against commit eecd18e0; no
   measured row is slower.
-
+- The cached Hensel valuation of a prime ideal with residue degree one and
+  ramification index one on an equation order now evaluates the element
+  at the lifted p-adic root of the defining polynomial (Newton lifting,
+  Cohen, GTM 138, Section 3.5) instead of reducing modulo the lifted linear
+  factor.  The valuations are bit-for-bit those of the generic path.
+  Primes dividing the index and non-monogenic orders keep the generic
+  path.  Outputs are identical on the proven and grh corpora with timing
+  keys removed (171 grh rows and 167 proven rows; the rows that time out
+  on both builds are excluded).  Measured in Ir only, on a busy machine:
+  ``imaginary_quadratic_d10000000799`` proven falls 13.08% (1,229.0M to
+  1,068.2M) and ``real_quadratic_d10000000005`` proven 5.06%.  Across all
+  171 grh rows and the 158 proven rows under 10 s, no row rises more than
+  0.13%.  No wall-clock claim is made.
 - The ``grh`` index bound used by validation now computes a refined
   Belabas-Friedman value (Theorem 7, target denominator ``max(8, 2B)``)
   before the default ``hR`` computation and stops there when the enclosure
