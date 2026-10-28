@@ -1284,11 +1284,12 @@ flint_bitcnt_t word_quotient_log_baby_giant_index_bits(ulong ell) noexcept {
 // Resource cap (cost only, no reference counterpart): baby-step giant-step
 // is taken only while its table has at most 2^24 slots of 16 bytes (256 MiB,
 // ell below about 2^46).  For a larger ell the table would grow toward tens
-// of GB as ell nears 2^64, and an allocation failure inside these noexcept
-// routines would terminate the process instead of failing closed.  Such an
-// ell takes the shared walk, the route every ell took before baby-step
-// giant-step, which returns the same unique logarithm in [0, ell) without
-// a table.
+// of GB as ell nears 2^64.  Such an ell takes the shared walk, the route
+// every ell took before baby-step giant-step, which returns the same unique
+// logarithm in [0, ell) without a table.  Below the cap the table is
+// allocated without throwing, and a failed allocation takes the same walk
+// (see word_quotient_log_baby_giant), so these noexcept routines never
+// terminate the process on allocation failure.
 constexpr flint_bitcnt_t kWordQuotientLogBabyGiantMaxIndexBits = 24;
 
 // Quotient logs of `pending` by baby-step giant-step with one baby-step
@@ -1298,8 +1299,12 @@ constexpr flint_bitcnt_t kWordQuotientLogBabyGiantMaxIndexBits = 24;
 // zeta^(-m) for i = 0, ..., m - 1, the logarithm being i m + j mod ell.  The
 // caller has checked that ell is prime and zeta has order ell, so the
 // logarithm is the unique exponent in [0, ell) and equals the one the walk
-// returns.  An entry not found is left unresolved for the caller.
-void word_quotient_log_baby_giant(
+// returns.  An entry not found is left unresolved for the caller.  Returns
+// false, with nothing written, when the baby-step table cannot be allocated
+// (a non-throwing allocation, so no exception reaches these noexcept
+// routines); the caller then takes the shared walk, which returns the same
+// logarithms.
+bool word_quotient_log_baby_giant(
         flint::FmpzMat& out,
         std::vector<bool>& resolved,
         const std::vector<WordQuotientLogTarget>& pending,
@@ -1340,9 +1345,16 @@ void word_quotient_log_baby_giant(
     };
     const ulong zeta_precomp =
             shoup ? n_mulmod_precomp_shoup(zeta, p_ui) : 0;
+    std::unique_ptr<WordQuotientLogBabyStep[]> table;
+    if (!ComputeTestSeams::fail_word_quotient_log_table()) {
+        table.reset(new (std::nothrow) WordQuotientLogBabyStep[mask + 1]);
+    }
+    if (table == nullptr) {
+        return false;
+    }
     WordQuotientLogBabyStep empty;
     empty.value = kWordQuotientLogEmptySlot;
-    std::vector<WordQuotientLogBabyStep> table(mask + 1, empty);
+    std::fill_n(table.get(), mask + 1, empty);
     ulong current = 1 % p_ui;
     for (ulong j = 0; j <= m; ++j) {
         // zeta^0, ..., zeta^m are distinct because m < ell, the order of
@@ -1382,6 +1394,7 @@ void word_quotient_log_baby_giant(
             y = step(y, giant, giant_precomp);
         }
     }
+    return true;
 }
 
 // The quotient logs of `pending` (images x^((p - 1) / ell) mod p) with
@@ -1391,8 +1404,9 @@ void word_quotient_log_baby_giant(
 // target or, from kWordQuotientLogBabyGiantBits on, when ell is prime,
 // zeta has order ell and the baby-step table fits
 // kWordQuotientLogBabyGiantMaxIndexBits, by word_quotient_log_baby_giant,
-// which gives the same unique exponent.  A target with no match below ell is
-// left unresolved.
+// which gives the same unique exponent (the walk is taken instead when the
+// table cannot be allocated).  A target with no match below ell is left
+// unresolved.
 void word_quotient_log_resolve(
         flint::FmpzMat& out,
         std::vector<bool>& resolved,
@@ -1410,10 +1424,10 @@ void word_quotient_log_resolve(
         word_quotient_log_baby_giant_index_bits(ell_ui) <=
                 kWordQuotientLogBabyGiantMaxIndexBits &&
         zeta != 1 && n_is_prime(ell_ui) != 0 &&
-        n_powmod2_ui_preinv(zeta, ell_ui, p_ui, p_inverse) == 1) {
-        ComputeTestSeams::count_word_quotient_log_baby_giant();
+        n_powmod2_ui_preinv(zeta, ell_ui, p_ui, p_inverse) == 1 &&
         word_quotient_log_baby_giant(out, resolved, pending, zeta, p_ui,
-                                     ell_ui, diagnostics);
+                                     ell_ui, diagnostics)) {
+        ComputeTestSeams::count_word_quotient_log_baby_giant();
         return;
     }
     ComputeTestSeams::count_word_quotient_log_walk();
@@ -1546,6 +1560,16 @@ bool WordQuotientLogsTestEntry::logs(std::vector<ulong>& logs,
         }
     }
     return true;
+}
+
+flint_bitcnt_t WordQuotientLogsTestEntry::baby_giant_index_bits(
+        ulong ell) noexcept {
+    return word_quotient_log_baby_giant_index_bits(ell);
+}
+
+flint_bitcnt_t WordQuotientLogsTestEntry::baby_giant_max_index_bits()
+        noexcept {
+    return kWordQuotientLogBabyGiantMaxIndexBits;
 }
 
 bool residue_quotient_log_column(

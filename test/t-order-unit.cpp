@@ -7169,6 +7169,109 @@ int test_word_quotient_logs_large_ell_keeps_walk() {
     return 0;
 }
 
+// The baby-step table of word_quotient_log_baby_giant has 2^index_bits
+// slots, index_bits the least value >= 4 with 2^index_bits >= 2 (m + 1),
+// m = isqrt(ell) + 1, and baby-step giant-step is taken only up to
+// kWordQuotientLogBabyGiantMaxIndexBits = 24 index bits.  So the last ell
+// with a 24-bit table is (2^23 - 1)^2 - 1 = 2^46 - 2^24 (m = 2^23 - 1,
+// 2 (m + 1) = 2^24), and (2^23 - 1)^2 already needs 25 bits; likewise the
+// first 24-bit ell is (2^22 - 1)^2 and the first 5-bit ell is 49.
+int test_word_quotient_log_baby_giant_index_bits_boundary() {
+    using silex::detail::TestHookAccess;
+    const flint_bitcnt_t max_bits =
+            TestHookAccess::word_quotient_log_baby_giant_max_index_bits();
+    const ulong top = (UWORD(1) << 23) - 1;
+    const ulong low = (UWORD(1) << 22) - 1;
+    struct Case {
+        ulong ell;
+        flint_bitcnt_t bits;
+    };
+    const Case cases[] = {
+            {2, 4},
+            {48, 4},
+            {49, 5},
+            {low * low - 1, 23},
+            {low * low, 24},
+            {top * top - 1, 24},
+            {top * top, 25},
+            {UWORD(1) << 46, 25},
+    };
+    assert(max_bits == 24);
+    if (max_bits != 24) {
+        return 1;
+    }
+    for (const Case& c : cases) {
+        const flint_bitcnt_t bits =
+                TestHookAccess::word_quotient_log_baby_giant_index_bits(c.ell);
+        assert(bits == c.bits);
+        if (bits != c.bits) {
+            return 1;
+        }
+    }
+    // The route cutoff: just under it the table fits, at it it does not.
+    assert(TestHookAccess::word_quotient_log_baby_giant_index_bits(
+                   top * top - 1) <= max_bits);
+    assert(TestHookAccess::word_quotient_log_baby_giant_index_bits(top * top) >
+           max_bits);
+    return 0;
+}
+
+// When the baby-step table cannot be allocated (simulated by a test seam),
+// word_quotient_log_resolve takes the shared walk instead of baby-step
+// giant-step, and returns the same logarithms.
+int test_word_quotient_logs_table_failure_takes_walk() {
+    using silex::detail::TestHookAccess;
+    const ulong ell = 65537;
+    ulong p = 0;
+    for (ulong k = 2;; k += 2) {
+        if (n_is_prime(k * ell + 1) != 0) {
+            p = k * ell + 1;
+            break;
+        }
+    }
+    const ulong p_inverse = n_preinvert_limb(p);
+    ulong zeta = 1;
+    for (ulong g = 2; zeta == 1; ++g) {
+        zeta = n_powmod2_ui_preinv(g, (p - 1) / ell, p, p_inverse);
+    }
+    const ulong exponents[] = {0, 1, 1000, 65536};
+    std::vector<ulong> images;
+    for (const ulong e : exponents) {
+        images.push_back(n_powmod2_ui_preinv(zeta, e, p, p_inverse));
+    }
+    for (const bool fail : {true, false}) {
+        std::vector<ulong> logs;
+        std::vector<bool> resolved;
+        const unsigned long walk_before =
+                TestHookAccess::word_quotient_log_walk_calls();
+        const unsigned long bsgs_before =
+                TestHookAccess::word_quotient_log_baby_giant_calls();
+        TestHookAccess::set_fail_word_quotient_log_table(fail);
+        const bool ok = TestHookAccess::word_quotient_logs(
+                logs, resolved, images, zeta, p, ell);
+        TestHookAccess::set_fail_word_quotient_log_table(false);
+        const unsigned long walks =
+                TestHookAccess::word_quotient_log_walk_calls() - walk_before;
+        const unsigned long bsgs =
+                TestHookAccess::word_quotient_log_baby_giant_calls() -
+                bsgs_before;
+        assert(ok);
+        assert(walks == (fail ? 1u : 0u));
+        assert(bsgs == (fail ? 0u : 1u));
+        if (!ok || walks != (fail ? 1u : 0u) || bsgs != (fail ? 0u : 1u) ||
+            logs.size() != images.size()) {
+            return 1;
+        }
+        for (std::size_t j = 0; j < images.size(); ++j) {
+            assert(resolved[j] && logs[j] == exponents[j]);
+            if (!resolved[j] || logs[j] != exponents[j]) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
 int test_direct_degree_one_residue_dlog_matrix_matches_residue_field() {
     silex::OrderUnitGroup group = real_quadratic_unit_group();
     const silex::Order* order = group.parent();
@@ -16904,6 +17007,8 @@ int main() {
     test_residue_quotient_log_column_walk_fallbacks_at_seven_bits();
     test_word_quotient_logs_match_walk_and_sorted_baby_giant();
     test_word_quotient_logs_large_ell_keeps_walk();
+    test_word_quotient_log_baby_giant_index_bits_boundary();
+    test_word_quotient_logs_table_failure_takes_walk();
     test_half_integral_direct_degree_one_residue_dlog_matches_residue_field();
     test_select_saturation_proof_primes();
     test_unit_proof_records();

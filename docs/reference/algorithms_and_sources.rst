@@ -2989,7 +2989,9 @@ logarithm.  As a resource cap with no Hecke counterpart, baby-step giant-step
 is taken only while its table has at most ``2^24`` slots (256 MiB, ``ell``
 below about ``2^46``); a larger ``ell`` keeps the shared walk, which returns
 the same logarithm without the table.  The walk takes up to ``ell`` steps, so
-such an ``ell`` is a time cost, not a crash.
+such an ``ell`` is a time cost, not a crash.  Below the cap the table is
+allocated without throwing, and when that allocation fails the same walk is
+taken.
 
 ``ResidueFieldQuotientLog::apply`` returns, for ``x`` in ``F_q^*`` with
 ``q = p^f``, the ``i`` in ``[0, ell)`` with ``zeta^i = x^((q - 1)/ell)``,

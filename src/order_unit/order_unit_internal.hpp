@@ -833,6 +833,12 @@ class WordQuotientLogsTestEntry {
                      ulong zeta,
                      ulong p,
                      ulong ell) noexcept;
+    // word_quotient_log_baby_giant_index_bits(ell) and
+    // kWordQuotientLogBabyGiantMaxIndexBits: the index bits of the baby-step
+    // table for ell, and the most index bits for which baby-step giant-step
+    // is taken.
+    static flint_bitcnt_t baby_giant_index_bits(ulong ell) noexcept;
+    static flint_bitcnt_t baby_giant_max_index_bits() noexcept;
 };
 bool residue_dlog_matrix_direct_degree_one(flint::FmpzMat& out,
                                            const OrderUnitGroup& group,

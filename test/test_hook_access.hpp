@@ -290,6 +290,25 @@ public:
                 std::memory_order_relaxed);
     }
 
+    // While set, word_quotient_log_baby_giant treats its baby-step table
+    // allocation as failed, so word_quotient_log_resolve takes the shared
+    // walk.  Skips no invariant: a real allocation can fail the same way.
+    static void set_fail_word_quotient_log_table(bool on) noexcept {
+        ComputeTestSeams::fail_word_quotient_log_table_.store(
+                on, std::memory_order_relaxed);
+    }
+
+    // word_quotient_log_baby_giant_index_bits(ell) and
+    // kWordQuotientLogBabyGiantMaxIndexBits (relation_kernel.cpp).
+    static flint_bitcnt_t word_quotient_log_baby_giant_index_bits(
+            ulong ell) noexcept {
+        return WordQuotientLogsTestEntry::baby_giant_index_bits(ell);
+    }
+    static flint_bitcnt_t word_quotient_log_baby_giant_max_index_bits()
+            noexcept {
+        return WordQuotientLogsTestEntry::baby_giant_max_index_bits();
+    }
+
     // Sets the failure injected into every later run of FLINT's certified
     // first LLL phase (CertifiedLllTestSeams, lat/certified_lll_internal.hpp),
     // at every call site, until it is set back to none.  The caller's

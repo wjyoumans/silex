@@ -1406,7 +1406,9 @@ Changed
   ``ell`` below about 2^46); a larger ``ell`` keeps the linear walk, which
   takes up to ``ell`` steps, so such an ``ell`` is a time cost, not a crash.
   Before, an ``ell`` near 2^64 would have asked for a table of tens of GB and
-  an allocation failure would have terminated the process.  Logarithms and
+  an allocation failure would have terminated the process.  Below the cap
+  the table is now allocated without throwing, and a failed allocation takes
+  the same walk instead of terminating the process.  Logarithms and
   published results are unchanged.
 
 - The baby-step giant-step quotient logarithms of the unit saturation proof

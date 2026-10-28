@@ -157,6 +157,12 @@ public:
         word_quotient_log_baby_giant_calls_.fetch_add(
                 1, std::memory_order_relaxed);
     }
+    // word_quotient_log_baby_giant: true while its baby-step table
+    // allocation should be treated as failed, so the call returns false and
+    // word_quotient_log_resolve takes the shared walk.  Read once per call.
+    static bool fail_word_quotient_log_table() noexcept {
+        return fail_word_quotient_log_table_.load(std::memory_order_relaxed);
+    }
 
 private:
     friend class TestHookAccess;
@@ -165,6 +171,7 @@ private:
             word_quotient_log_baby_giant_calls_{0};
     inline static std::atomic<bool> forget_validation_summary_{false};
     inline static std::atomic<bool> continuation_appends_nothing_{false};
+    inline static std::atomic<bool> fail_word_quotient_log_table_{false};
 };
 
 const char* validate_refine_outcome_name(ValidateRefineOutcome outcome)
