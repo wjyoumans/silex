@@ -397,7 +397,9 @@ public:
     // when the index-one value is unavailable (degree one, or no cutoff up
     // to the default maximum reaches 1/4).  The caller must
     // use the default value from ensure() for anything other than
-    // recognizing index one.
+    // recognizing index one, the coarse index bound B that schedules the
+    // refined value, and the grh validation index bound when its
+    // enclosure of h_cand R_cand / hR holds a single integer.
     bool ensure_index_one(const Order& order,
                           slong precision,
                           const DiagnosticsContext* diagnostics = nullptr,

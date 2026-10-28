@@ -16922,6 +16922,17 @@ int test_grh_index_bound_coarse_value_single_integer() {
     assert(sflint::arb_lt(coarse_audit->error_bound, quarter));
     assert(coarse_audit->theorem7_log_radius_denominator == 4);
     assert(analytic_cache.ensure_index_one(order, 128));
+    // The single integer is 2, the index of the squared fundamental unit,
+    // and the bound is the ceiling of the upper endpoint: 2 or 3.
+    sflint::Arb candidate_product;
+    assert(index_two.class_regulator_product(
+            sflint::ArbRef(candidate_product), class_group, 128));
+    sflint::Arb coarse_quotient;
+    sflint::arb_div(coarse_quotient, candidate_product, analytic_cache.value(),
+                    128);
+    assert(sflint::arb_contains_si(coarse_quotient, 2));
+    assert(sflint::fmpz_cmp_ui(sflint::FmpzConstRef(coarse_bound), 2) >= 0);
+    assert(sflint::fmpz_cmp_ui(sflint::FmpzConstRef(coarse_bound), 3) <= 0);
 
     silex::detail::AnalyticClassRegulatorCache default_cache;
     assert(default_cache.ensure(order, 128, nullptr,

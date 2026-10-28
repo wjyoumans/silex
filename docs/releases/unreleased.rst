@@ -186,15 +186,17 @@ Changed
   but its index enclosure already holds a single integer; the refined value
   and the default ``hR`` are then not computed.  Otherwise the refined value
   and the default ``hR`` decide as before.  ``grh`` outputs, with timing
-  keys removed, are identical on 171 corpus rows, including published index
-  bounds and ``class_group.zeta_bf_proof_record``
-  (``cyclotomic_real_163_deg81`` times out on both).  Whole-process
-  callgrind Ir of ``grh`` (busy machine) drops by 33.30% on
-  ``real_quadratic_d100000001``, 25.07% on
-  ``imaginary_quadratic_d100000000000319``, 18.28% on
-  ``quintic_disc401370255_proven``, 17.45% on ``cubic_disc1080004_proven``
-  and 1.42% to 12.54% on 12 further rows that reach the refined step.  No
-  row is slower by more than 0.02%.
+  keys removed, are identical on 171 corpus rows and the 15 fixture-only
+  test fields, including published index bounds and
+  ``class_group.zeta_bf_proof_record`` (``cyclotomic_real_163_deg81``
+  times out on both).  Whole-process callgrind Ir of ``grh`` (busy
+  machine, single runs; baseline Ir varies by up to about 2% between runs
+  on these rows) drops by about 33% on ``real_quadratic_d100000001``,
+  about 25% on ``imaginary_quadratic_d100000000000319``, about 18% on
+  ``quintic_disc401370255_proven``, about 17% on
+  ``cubic_disc1080004_proven`` and about 1% to 13% on 12 further rows
+  that reach the refined step.  No row is slower by more than 0.02% in
+  these runs.
 
 - ``Ideal::multiply`` on a maximal order, when the two-generator search for
   the product fails, now takes a modular Hermite normal form of the ``n^2``

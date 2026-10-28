@@ -2587,18 +2587,20 @@ Euler-product cutoff is the smallest one whose Theorem 7 error bound
 ``sigma = 1 + 1/sqrt(log D)``) is below 1/4 - 2^-20, an absolute error on
 ``log hR`` that is enough to decide an index below two (footnote 1 of the
 paper; PARI ``buch2.c:primeneeded`` uses the same 0.25).  The margin 2^-20
-is reserved for numerical error.  The coarse value is used as is only when
-it shows index one.  When it shows an index above one, with coarse index
-bound ``B``, the validation index bound next tries a refined value of the
-same route, whose Theorem 7 bound is below ``1/q - 2^-20`` with
-``q = max(8, 2B)``.  It is used only when its enclosure of
-``h_cand R_cand / hR`` holds a single integer ``k`` (the ceiling of the
-lower endpoint equals the floor of the upper one) and factor-base
-generation holds under GRH, so that the quotient is the class/unit index
-and equals ``k``; the bound is then the ceiling of the upper endpoint, as
-with the default value, which gives the same integer whenever its own
-enclosure has its upper endpoint in ``(k, k + 1)``.  ``q`` only schedules
-the work: with the index ``k <= B`` and a relative width about ``2/q``,
+is reserved for numerical error.  When the coarse value shows an index
+above one, the validation index bound applies a single-integer rule to an
+enclosure of ``h_cand R_cand / hR``: the enclosure must hold a single
+integer ``k`` (the ceiling of the lower endpoint equals the floor of the
+upper one) and factor-base generation must hold under GRH, so that the
+quotient is the class/unit index and equals ``k``; the bound is then the
+ceiling of the upper endpoint, as with the default value, which gives the
+same integer whenever its own enclosure has its upper endpoint in
+``(k, k + 1)``.  The rule is applied first to the coarse enclosure, which
+then gives the bound itself.  Only when that does not decide, with coarse
+index bound ``B``, does the validation index bound try a refined value of
+the same route, whose Theorem 7 bound is below ``1/q - 2^-20`` with
+``q = max(8, 2B)``, under the same rule, and only then when ``B`` is below
+``2^19``.  ``q`` only schedules the work: with the index ``k <= B`` and a relative width about ``2/q``,
 the enclosure is at most about one unit wide.  It is Silex's choice,
 measured on the ``grh`` corpus, not taken from a source.  If the scan finds no cutoff up to 20007, the refined value finds none for
 ``1/q``, or its enclosure holds two or more integers or none, the default
