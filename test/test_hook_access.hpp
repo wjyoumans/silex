@@ -63,6 +63,24 @@ public:
                 armed, std::memory_order_relaxed);
     }
 
+    // While armed, the cached Hensel valuation of a residue-degree-one prime
+    // built from then on lifts the residue factor (the generic route)
+    // instead of its root.  Skips no invariant: both routes give the exact
+    // valuation.
+    static void set_degree_one_hensel_valuation_disabled(bool armed) noexcept {
+        PrimeIdealTestSeams::degree_one_hensel_off_.store(
+                armed, std::memory_order_relaxed);
+    }
+
+    // Whether `prime` holds a cached Hensel valuation, its precision
+    // exponent k (modulo p^k), and whether it is the degree-one root cache.
+    static bool hensel_valuation_cache_state(bool& degree_one,
+                                             slong& exponent,
+                                             const PrimeIdeal& prime) noexcept {
+        return PrimeIdealAccess::hensel_valuation_cache_state(degree_one,
+                                                              exponent, prime);
+    }
+
     // How many ideal builds the armed seam has failed since the process
     // started.
     static slong prime_ideal_build_failures_taken() noexcept {

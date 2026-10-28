@@ -240,6 +240,68 @@ bool hensel_lift_factor_to_precision(
     return true;
 }
 
+// Degree-one case of `hensel_lift_factor_to_precision`: lifts the simple
+// root `root_mod_prime` of the monic integral `field_polynomial` T modulo p
+// to the root r of T modulo q = p^k (`target_ctx`), by the Newton step
+// r <- r - T(r) / T'(r) mod q (Hensel's lemma for a simple root, the
+// linear-factor case of the quadratic Hensel lift above; Cohen, GTM 138,
+// Section 3.5, Hensel lifting).  Each step doubles the p-adic precision of
+// T(r) = 0 because T'(r) is a unit at p.
+// The lifted root is the unique root of T modulo q congruent to
+// `root_mod_prime` (Hensel uniqueness), so x - r is exactly the monic linear
+// factor that the generic lift returns for the residue factor
+// x - root_mod_prime.  Returns false, leaving `out` unspecified, if the root
+// is not simple modulo p, so callers fall back to the generic lift.  The
+// caller has checked that `field_polynomial` is monic integral.
+bool lift_simple_root_to_precision(flint::Fmpz& out,
+                                   const fmpq_poly_t field_polynomial,
+                                   const fmpz_t root_mod_prime,
+                                   const fmpz_t prime,
+                                   const flint::FmpzModCtx& target_ctx) noexcept {
+    flint::FmpzModPoly field_mod_target(target_ctx);
+    flint::FmpzModPoly derivative(target_ctx);
+    if (!field_mod_target.is_initialized() || !derivative.is_initialized()) {
+        return false;
+    }
+    fmpq_poly_get_fmpz_mod_poly(field_mod_target, field_polynomial,
+                                target_ctx);
+    fmpz_mod_poly_derivative(derivative.raw(), field_mod_target.raw(),
+                             target_ctx.raw());
+
+    const fmpz* modulus = fmpz_mod_ctx_modulus(target_ctx.raw());
+    flint::Fmpz value;
+    flint::Fmpz slope;
+    flint::Fmpz inverse;
+    fmpz_mod(out.raw(), root_mod_prime, prime);
+    fmpz_mod_poly_evaluate_fmpz(value.raw(), field_mod_target.raw(),
+                                out.raw(), target_ctx.raw());
+    fmpz_mod_poly_evaluate_fmpz(slope.raw(), derivative.raw(), out.raw(),
+                                target_ctx.raw());
+    if (fmpz_divisible(value.raw(), prime) == 0 ||
+        fmpz_divisible(slope.raw(), prime) != 0) {
+        return false;
+    }
+    // T(r) = 0 mod p^j before a step gives T(r) = 0 mod p^(2j) after it,
+    // so at most ceil(log2 k) + 1 evaluations reach T(r) = 0 mod q; the cap
+    // only bounds the loop.
+    for (int step = 0; step < 2 * FLINT_BITS; ++step) {
+        if (fmpz_is_zero(value.raw()) != 0) {
+            return true;
+        }
+        if (fmpz_invmod(inverse.raw(), slope.raw(), modulus) == 0) {
+            return false;
+        }
+        fmpz_mul(value.raw(), value.raw(), inverse.raw());
+        fmpz_sub(out.raw(), out.raw(), value.raw());
+        fmpz_mod(out.raw(), out.raw(), modulus);
+        fmpz_mod_poly_evaluate_fmpz(value.raw(), field_mod_target.raw(),
+                                    out.raw(), target_ctx.raw());
+        fmpz_mod_poly_evaluate_fmpz(slope.raw(), derivative.raw(),
+                                    out.raw(), target_ctx.raw());
+    }
+    return false;
+}
+
 slong fmpz_valuation_capped(const fmpz_t input,
                             const fmpz_t prime,
                             slong cap) noexcept {
@@ -3124,6 +3186,11 @@ struct PrimeIdeal::HenselValuationCache {
     flint::FmpzModCtx target_ctx;
     flint::FmpzModPoly lifted_factor;
     slong exponent = 0;
+    // Residue degree one: instead of `lifted_factor` = x - r, the cache holds
+    // the root r of the field polynomial modulo `target_modulus`, and a query
+    // evaluates the input at r (its remainder modulo x - r).
+    bool degree_one = false;
+    flint::Fmpz root;
 };
 
 struct PrimeIdeal::ContainmentPowerCache {
@@ -3716,6 +3783,22 @@ bool PrimeIdeal::valuation(
 
 namespace detail {
 
+bool PrimeIdealAccess::hensel_valuation_cache_state(
+        bool& degree_one,
+        slong& exponent,
+        const PrimeIdeal& prime) noexcept {
+    const PrimeIdeal::HenselValuationCache* cache =
+            prime.hensel_valuation_cache_.get();
+    if (cache == nullptr) {
+        degree_one = false;
+        exponent = 0;
+        return false;
+    }
+    degree_one = cache->degree_one;
+    exponent = cache->exponent;
+    return true;
+}
+
 bool PrimeIdealAccess::prime_ideal_valuation_with_norm_vp(
         slong& out,
         const PrimeIdeal& prime,
@@ -3799,8 +3882,6 @@ bool PrimeIdeal::valuation_with_norm_vp_impl(
                     diagnostics,
                     "prime_ideal.valuation_order_element.fallback_hensel_coordinates");
         } else {
-            integral_coords_to_poly(input_polynomial, coordinates.raw());
-
             auto cache_for_bound = [&]() noexcept
                     -> const HenselValuationCache* {
                 const HenselValuationCache* cache =
@@ -3817,6 +3898,36 @@ bool PrimeIdeal::valuation_with_norm_vp_impl(
                 if (cache == nullptr) {
                     return false;
                 }
+                if (cache->degree_one) {
+                    // Precision argument (f = e = 1, p prime to the index,
+                    // here 1): the completion of O at P is Z_p, with theta
+                    // mapped to the root rho in Z_p of the field polynomial
+                    // lifting the residue root, and p a uniformizer, so
+                    // v_P(a) = v_p(a(rho)).  The coordinates of a are
+                    // integers and root = rho mod q, q = p^k, k =
+                    // cache->exponent, so a(root) = a(rho) mod q and
+                    // min(bound, v_p(a(root) mod q)) = min(bound, v_P(a))
+                    // since bound <= k.  The norm bound gives
+                    // v_P(a) <= v_p(N(a)) / f = bound, so this is v_P(a).
+                    // The generic branch below returns the same number:
+                    // its remainder modulo the lifted factor x - root is
+                    // the constant a(root) mod q.
+                    flint::Fmpz value;
+                    const fmpz* modulus = cache->target_modulus.raw();
+                    for (slong j = fmpz_mat_ncols(coordinates.raw()) - 1;
+                         j >= 0; --j) {
+                        fmpz_mul(value.raw(), value.raw(),
+                                 cache->root.raw());
+                        fmpz_add(value.raw(), value.raw(),
+                                 fmpz_mat_entry(coordinates.raw(), 0, j));
+                        fmpz_mod(value.raw(), value.raw(), modulus);
+                    }
+                    valuation_out =
+                            fmpz_valuation_capped(value.raw(), p_.raw(),
+                                                  bound);
+                    return true;
+                }
+                integral_coords_to_poly(input_polynomial, coordinates.raw());
                 flint::FmpzModPoly input_mod(cache->target_ctx);
                 flint::FmpzModPoly remainder(cache->target_ctx);
                 if (!input_mod.is_initialized() ||
@@ -3846,6 +3957,37 @@ bool PrimeIdeal::valuation_with_norm_vp_impl(
             const nf_struct* raw_field = parent_.parent()->raw_flint_field();
             if (raw_field != nullptr &&
                 fmpq_poly_is_monic_integral(raw_field->pol)) {
+                if (f_ == 1 && has_linear_residue_root_ &&
+                    cache_for_bound() == nullptr &&
+                    !detail::PrimeIdealTestSeams::
+                            degree_one_hensel_disabled()) {
+                    // Residue degree one: lift the root of the residue
+                    // factor instead of the factor (see
+                    // `lift_simple_root_to_precision`); on failure the
+                    // generic lift below runs.
+                    flint::Fmpz target_modulus;
+                    fmpz_pow_ui(target_modulus.raw(), p_.raw(),
+                                static_cast<ulong>(bound));
+                    std::unique_ptr<HenselValuationCache> next(
+                            new (std::nothrow) HenselValuationCache(
+                                    target_modulus.raw(), bound));
+                    if (next != nullptr && next->is_initialized() &&
+                        lift_simple_root_to_precision(
+                                next->root, raw_field->pol,
+                                linear_residue_root_.raw(), p_.raw(),
+                                next->target_ctx)) {
+                        next->degree_one = true;
+                        hensel_valuation_cache_ = std::move(next);
+                        slong valuation = 0;
+                        if (try_cached_hensel(cache_for_bound(), valuation)) {
+                            SILEX_PRIME_IDEAL_PROFILE_EVENT(
+                                    diagnostics,
+                                    "prime_ideal.valuation_order_element.path_no_index_hensel");
+                            out = valuation;
+                            return true;
+                        }
+                    }
+                }
                 flint::FmpzModCtx prime_ctx(p_.raw());
                 flint::FmpzModPoly field_mod_prime(prime_ctx);
                 flint::FmpzModPoly factor_mod_prime(prime_ctx);

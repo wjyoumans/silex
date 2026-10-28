@@ -30,10 +30,19 @@ public:
         return true;
     }
 
+    // True while armed: the cached Hensel valuation of a residue-degree-one
+    // prime lifts the residue factor (the generic route) instead of its
+    // root, so tests can compare the two.  One relaxed atomic load per
+    // valuation cache build.
+    static bool degree_one_hensel_disabled() noexcept {
+        return degree_one_hensel_off_.load(std::memory_order_relaxed);
+    }
+
 private:
     friend class TestHookAccess;
     inline static std::atomic<bool> ideal_build_failure_{false};
     inline static std::atomic<slong> ideal_build_failures_taken_{0};
+    inline static std::atomic<bool> degree_one_hensel_off_{false};
 };
 
 enum class RetainedQuadraticPrimeKind {
@@ -331,6 +340,14 @@ public:
 
 private:
     friend class TestHookAccess;
+
+    // Test hook: whether `prime` holds a cached Hensel valuation and, if it
+    // does, its p-adic precision k (the cache works modulo p^k) and whether
+    // it holds the lifted root of a residue-degree-one factor.  For tests
+    // only.
+    static bool hensel_valuation_cache_state(bool& degree_one,
+                                             slong& exponent,
+                                             const PrimeIdeal& prime) noexcept;
 
     // Test hook: values `element` at `prime` by coordinate divisibility
     // with the anti-uniformizer taken from the HNF of P, the route used for

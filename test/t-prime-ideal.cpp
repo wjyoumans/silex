@@ -26,6 +26,7 @@
 #include <array>
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <utility>
 #include <span>
@@ -6676,6 +6677,230 @@ int test_primitive_root_word_size_matches_fmpz() {
     return 0;
 }
 
+// The cached Hensel valuation of a residue-degree-one prime of a maximal
+// equation order (p prime to the index) evaluates the coordinate polynomial
+// at the p-adic root of the field polynomial, lifted modulo p^k, instead of
+// reducing it modulo the lifted factor x - r.  For every prime with e = 1
+// above a set of rational primes in fields whose maximal order is the
+// equation order (including primes p where the field polynomial is not
+// squarefree modulo p because another prime above p ramifies, and primes p
+// whose powers p^k are multiword), the public valuation must equal the
+// valuation with the specialisation disabled (the generic lift) and the
+// exact power-containment valuation, on deterministic pseudo-random
+// elements, products of HNF basis elements of P (valuations above one) and
+// multiword scalings.  Elements are queried in an order that both reuses a
+// cache of higher precision and rebuilds one at a higher bound.
+int test_valuation_degree_one_hensel_matches_generic() {
+    const std::vector<std::vector<slong>> fields = {
+            // x^2 + 1.
+            {1, 0, 1},
+            // x^2 - x + 2500000200, discriminant -10000000799.
+            {2500000200, -1, 1},
+            // x^2 - x - 2500000001, discriminant 10000000005.
+            {-2500000001, -1, 1},
+            // x^3 - x - 1, discriminant -23: 23 = P^2 Q.
+            {-1, -1, 0, 1},
+            // x^4 - x - 1, discriminant -283.
+            {-1, -1, 0, 0, 1},
+            // x^5 - x - 1, discriminant 2869 = 19 * 151.
+            {-1, -1, 0, 0, 0, 1},
+    };
+    const std::vector<slong> rational_primes = {
+            2, 3, 5, 7, 11, 13, 17, 19, 23, 151, 283, 1000000009};
+    slong checked_degree_one = 0;
+    slong checked_degree_one_above_one = 0;
+    slong checked_degree_one_multiword = 0;
+    slong checked_degree_one_nonsquarefree = 0;
+    slong checked_higher_degree = 0;
+    std::uint64_t state = 0x9e3779b97f4a7c15ULL;
+    auto next_small = [&state]() noexcept -> slong {
+        state = state * 6364136223846793005ULL + 1442695040888963407ULL;
+        return static_cast<slong>((state >> 33) % 2001) - 1000;
+    };
+    for (const std::vector<slong>& coefficients : fields) {
+        sflint::FmpqPoly polynomial;
+        for (std::size_t i = 0; i < coefficients.size(); ++i) {
+            sflint::fmpq_poly_set_coeff_si(polynomial,
+                                           static_cast<slong>(i),
+                                           coefficients[i]);
+        }
+        silex::NumberField field;
+        silex::Order equation;
+        equation = order_by_polynomial(field, polynomial);
+        silex::Order maximal(field);
+        assert(maximal.maximal_order(equation));
+        assert(maximal.is_equation_order());
+        const slong n = maximal.degree();
+
+        for (slong rational_prime : rational_primes) {
+            sflint::Fmpz p;
+            assert(set_fmpz_si(p, rational_prime));
+            silex::PrimeIdealList primes;
+            silex::PrimeIdealList generic_primes;
+            assert(silex::decompose_prime(primes, maximal,
+                                          sflint::FmpzConstRef(p)));
+            assert(silex::decompose_prime(generic_primes, maximal,
+                                          sflint::FmpzConstRef(p)));
+            assert(primes.size() == generic_primes.size());
+            bool ramified_over_p = false;
+            for (slong i = 0; i < primes.size(); ++i) {
+                ramified_over_p = ramified_over_p ||
+                                  primes.at(i)->ramification_index() > 1;
+            }
+            for (slong prime_index = 0; prime_index < primes.size();
+                 ++prime_index) {
+                const silex::PrimeIdeal* prime = primes.at(prime_index);
+                const silex::PrimeIdeal* generic =
+                        generic_primes.at(prime_index);
+                assert(prime != nullptr && generic != nullptr);
+                assert(prime->residue_degree() ==
+                       generic->residue_degree());
+                assert(prime->ramification_index() ==
+                       generic->ramification_index());
+                if (prime->ramification_index() != 1) {
+                    continue;
+                }
+                const bool degree_one = prime->residue_degree() == 1;
+                silex::Ideal prime_ideal(maximal);
+                sflint::FmpzMat hnf(n, n);
+                assert(prime->get_ideal(prime_ideal));
+                assert(prime_ideal.get_hnf(sflint::FmpzMatRef(hnf)));
+
+                std::vector<silex::OrderElement> basis;
+                for (slong i = 0; i < n; ++i) {
+                    sflint::FmpzMat row(1, n);
+                    for (slong j = 0; j < n; ++j) {
+                        fmpz_set(fmpz_mat_entry(row.raw(), 0, j),
+                                 fmpz_mat_entry(hnf.raw(), i, j));
+                    }
+                    silex::OrderElement element(maximal);
+                    assert(element.set_coordinates(
+                            sflint::FmpzMatConstRef(row)));
+                    basis.push_back(std::move(element));
+                }
+                std::vector<silex::OrderElement> elements;
+                for (slong t = 0; t < 10; ++t) {
+                    sflint::FmpzMat coordinates(1, n);
+                    bool nonzero = false;
+                    for (slong j = 0; j < n; ++j) {
+                        const slong c = next_small();
+                        fmpz_set_si(fmpz_mat_entry(coordinates.raw(), 0, j),
+                                    c);
+                        nonzero = nonzero || c != 0;
+                    }
+                    if (!nonzero) {
+                        continue;
+                    }
+                    silex::OrderElement element(maximal);
+                    assert(element.set_coordinates(
+                            sflint::FmpzMatConstRef(coordinates)));
+                    // A product of up to four HNF basis elements of P
+                    // first (high bound), then the plain element (lower
+                    // bound, cache reuse), then a product of one more
+                    // (higher bound, rebuild).
+                    silex::OrderElement product(maximal);
+                    assert(product.set(element));
+                    for (slong k = 0; k < 1 + t % 4; ++k) {
+                        silex::OrderElement next(maximal);
+                        assert(next.multiply(
+                                product,
+                                basis[static_cast<std::size_t>(
+                                        (t + k) % n)]));
+                        product = std::move(next);
+                    }
+                    silex::OrderElement more(maximal);
+                    assert(more.multiply(product, basis[0]));
+                    elements.push_back(std::move(product));
+                    elements.push_back(std::move(element));
+                    elements.push_back(std::move(more));
+                }
+                // Scaling by c = p 2^70 + 1, a unit at P, keeps the
+                // valuation and gives multiword coordinates.
+                {
+                    sflint::Fmpz c;
+                    fmpz_mul_2exp(c.raw(), p.raw(), 70);
+                    fmpz_add_ui(c.raw(), c.raw(), 1);
+                    const std::size_t unscaled = elements.size();
+                    for (std::size_t i = 0; i < unscaled; i += 3) {
+                        sflint::FmpzMat coordinates(1, n);
+                        assert(elements[i].get_coordinates(
+                                sflint::FmpzMatRef(coordinates)));
+                        fmpz_mat_scalar_mul_fmpz(coordinates.raw(),
+                                                 coordinates.raw(), c.raw());
+                        silex::OrderElement scaled(maximal);
+                        assert(scaled.set_coordinates(
+                                sflint::FmpzMatConstRef(coordinates)));
+                        elements.push_back(std::move(scaled));
+                    }
+                }
+
+                for (const silex::OrderElement& element : elements) {
+                    if (element.equal_si(0)) {
+                        continue;
+                    }
+                    slong value = -1;
+                    slong generic_value = -1;
+                    slong expected = -1;
+                    assert(prime->valuation(value, element));
+                    silex::detail::TestHookAccess::
+                            set_degree_one_hensel_valuation_disabled(true);
+                    const bool generic_ok =
+                            generic->valuation(generic_value, element);
+                    silex::detail::TestHookAccess::
+                            set_degree_one_hensel_valuation_disabled(false);
+                    assert(generic_ok);
+                    assert(silex::detail::TestHookAccess::
+                                   valuation_by_power_containment(
+                                           expected, *prime, element, 40));
+                    assert(expected < 40);
+                    assert(value == expected);
+                    assert(generic_value == expected);
+
+                    bool cache_degree_one = false;
+                    slong exponent = 0;
+                    const bool cached = silex::detail::TestHookAccess::
+                            hensel_valuation_cache_state(cache_degree_one,
+                                                         exponent, *prime);
+                    bool generic_degree_one = true;
+                    slong generic_exponent = 0;
+                    const bool generic_cached =
+                            silex::detail::TestHookAccess::
+                                    hensel_valuation_cache_state(
+                                            generic_degree_one,
+                                            generic_exponent, *generic);
+                    assert(cached == generic_cached);
+                    if (!cached) {
+                        continue;
+                    }
+                    assert(exponent == generic_exponent);
+                    assert(!generic_degree_one);
+                    assert(cache_degree_one == degree_one);
+                    if (!degree_one) {
+                        ++checked_higher_degree;
+                        continue;
+                    }
+                    ++checked_degree_one;
+                    if (expected > 1) {
+                        ++checked_degree_one_above_one;
+                    }
+                    if (fmpz_bits(p.raw()) * exponent > FLINT_BITS) {
+                        ++checked_degree_one_multiword;
+                    }
+                    if (ramified_over_p) {
+                        ++checked_degree_one_nonsquarefree;
+                    }
+                }
+            }
+        }
+    }
+    assert(checked_degree_one > 0);
+    assert(checked_degree_one_above_one > 0);
+    assert(checked_degree_one_multiword > 0);
+    assert(checked_degree_one_nonsquarefree > 0);
+    assert(checked_higher_degree > 0);
+    return 0;
+}
+
 int main(int argc, char** argv) {
     if (argc == 2 &&
         std::string_view(argv[1]) == "--primitive-root-agreement") {
@@ -6735,6 +6960,7 @@ int main(int argc, char** argv) {
     assert(test_valuation_power_containment_matches_definition() == 0);
     assert(test_valuation_power_containment_matches_gp() == 0);
     assert(test_valuation_anti_uniformizer_matches_containment() == 0);
+    assert(test_valuation_degree_one_hensel_matches_generic() == 0);
     assert(test_coordinate_valuation_word_power_chunks() == 0);
     assert(test_principal_ideal_valuation_matches_element_valuation() ==
            0);
