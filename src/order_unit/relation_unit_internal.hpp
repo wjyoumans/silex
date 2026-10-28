@@ -31,6 +31,12 @@ inline constexpr slong kRelAddStartPrecision = 32;
 // fails the search, and add_dependent_unit then leaves the group unchanged.
 inline constexpr slong kRelAddMaxPrecision = WORD(1) << 16;
 inline constexpr slong kReduceModUnitsMaxPrecision = 10000;
+// Termination bound of reduce_relation_units_modulo, not a mathematical
+// bound: the most approximate reductions it applies at one precision before
+// it doubles the precision as the reference does after every approximate
+// rounding.  The reference (Clgp/Map.jl:reduce_mod_units, v0.38.6, line 614)
+// declares cnt = 10 but never reads it; the same count is used here.
+inline constexpr slong kReduceModUnitsApproximateRetries = 10;
 
 enum class RelationTorsionStatus {
     torsion,

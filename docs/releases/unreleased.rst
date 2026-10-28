@@ -1352,6 +1352,12 @@ Changed
   instructions, 1.45e9 to 0.58e9, and ``real_quadratic_d100000005`` 20%
   fewer).
 
+- Reducing relation units modulo the unit group applies at most 10
+  approximate reductions at one precision and then doubles the precision, as
+  the reference does, stopping at the existing precision cap.  Before, the
+  retries at one precision had no bound.  The test suite applies at most one
+  approximate reduction per precision, so its results are unchanged.
+
 - The baby-step giant-step quotient logarithms of the unit saturation proof
   are taken only while their baby-step table fits in 2^24 slots (256 MiB,
   ``ell`` below about 2^46); a larger ``ell`` keeps the linear walk.  Before,

@@ -1831,7 +1831,12 @@ retries at the same precision.  The loop ends when an exact rounding succeeds,
 when the coefficients are all zero (whether from exact or approximate
 rounding), or, through the branch where the approximate rounding fails, when a
 half-integer tie stops it or the cap is reached; only that failing branch
-changes the precision.  The all-zero exit is where Silex can be less reduced
+changes the precision.  Approximate coefficients need not make progress, so
+the loop could otherwise cycle at one precision.  As a termination bound,
+after 10 approximate reductions at one precision (the count of Hecke's
+``cnt = 10``, which ``reduce_mod_units`` declares at ``Map.jl`` line 614 but
+never reads) Silex doubles the precision as Hecke does, and stops at the cap
+with the values reduced so far.  The all-zero exit is where Silex can be less reduced
 than Hecke: an approximate rounding of a ball such as 0.5 +- 0.45 gives zero,
 where Hecke would double the precision and might round exactly to a nonzero
 value.  The function also reduces class-group relation generators and unit

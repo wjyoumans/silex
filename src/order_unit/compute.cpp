@@ -3418,6 +3418,14 @@ bool reduce_relation_units_modulo(std::vector<FactoredElement>& values,
 
     const slong max_precision =
             max_slong(precision, kReduceModUnitsMaxPrecision);
+    // Termination: approximate coefficients do not have to make progress (a
+    // wide coordinate ball rounds to the middle of its integer range, so the
+    // values could cycle), so at most kReduceModUnitsApproximateRetries of
+    // them are applied at one precision; the last of them, like every pass
+    // that neither returns nor applies coefficients, doubles the precision,
+    // which stops at max_precision.  So the loop runs at most
+    // kReduceModUnitsApproximateRetries passes per precision.
+    slong approximate_retries = 0;
     for (; precision <= max_precision;) {
         const flint::ArbMat* unit_log_inverse = nullptr;
         if (extraction_state != nullptr) {
@@ -3467,7 +3475,13 @@ bool reduce_relation_units_modulo(std::vector<FactoredElement>& values,
             // discards them and doubles the precision (see
             // reduction_coordinates).  All-zero coefficients return above at
             // the current precision, where the reference would double it.
-            continue;
+            if (++approximate_retries < kReduceModUnitsApproximateRetries) {
+                continue;
+            }
+            // The retry bound is reached: double the precision, as the
+            // reference does after every approximate rounding, or stop at
+            // the cap with the values reduced so far (half_integer_tie is
+            // false here: reduction_coordinates sets it only on failure).
         }
         // A coordinate that is a narrow ball around a half-integer cannot be
         // rounded at any precision when it is an exact tie.  When every
@@ -3493,6 +3507,7 @@ bool reduce_relation_units_modulo(std::vector<FactoredElement>& values,
             break;
         }
         precision *= 2;
+        approximate_retries = 0;
     }
 
     return true;
