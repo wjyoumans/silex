@@ -309,6 +309,23 @@ public:
         return WordQuotientLogsTestEntry::baby_giant_max_index_bits();
     }
 
+    // While set, every pass of reduce_relation_units_modulo whose reduction
+    // coordinates succeed applies the approximate coefficients 1 on the
+    // first free generator of the first value and 0 elsewhere.  Skips the
+    // invariant that the coefficients are the rounded coordinates, so the
+    // values change on every pass and never reach zero coefficients.
+    static void set_reduce_mod_units_fixed_approximate_coefficients(
+            bool on) noexcept {
+        ComputeTestSeams::reduce_mod_units_fixed_approximate_coefficients_
+                .store(on, std::memory_order_relaxed);
+    }
+    // Passes of reduce_relation_units_modulo that reached the
+    // approximate-retry bound since the process started.  Read-only.
+    static unsigned long reduce_mod_units_retry_bound_hits() noexcept {
+        return ComputeTestSeams::reduce_mod_units_retry_bound_hits_.load(
+                std::memory_order_relaxed);
+    }
+
     // Sets the failure injected into every later run of FLINT's certified
     // first LLL phase (CertifiedLllTestSeams, lat/certified_lll_internal.hpp),
     // at every call site, until it is set back to none.  The caller's

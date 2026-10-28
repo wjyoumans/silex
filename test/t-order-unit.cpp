@@ -1403,6 +1403,77 @@ int test_reduce_mod_units_unfit_coefficient_stops() {
     return 0;
 }
 
+// reduce_relation_units_modulo applies at most
+// kReduceModUnitsApproximateRetries approximate reductions at one precision
+// and then doubles the precision, up to its cap.  A test seam replaces every
+// successful pass's coefficients by the fixed approximate coefficients 1 on
+// the first free generator g, so the value changes on every pass and the
+// coefficients never become zero; without the bound the loop would not end.
+// Each fall-through at the bound is counted: the call must end, return true,
+// reach the bound at more than one precision, and return the value times
+// g^(-N), N being the kReduceModUnitsApproximateRetries reductions applied
+// at each precision that reached the bound.
+int test_reduce_mod_units_approximate_retry_bound_falls_through() {
+    silex::NumberField cubic = cubic_field(-3, 1);
+    silex::Order order;
+    order = silex::test::equation_order(cubic);
+    silex::Element theta(cubic);
+    silex::Element theta_minus_one(cubic);
+    assert(theta.gen());
+    assert(theta_minus_one.add_si(theta, -1));
+    silex::FactoredElement generators[] = {
+            silex::FactoredElement(cubic), silex::FactoredElement(cubic)};
+    assert(generators[0].set_element(theta));
+    assert(generators[1].set_element(theta_minus_one));
+    silex::EmbeddingContext embeddings(cubic);
+    silex::OrderUnitGroup group;
+    assert(group.set_units(order, silex::FactoredElementSpan(generators, 2),
+                           embeddings, 64));
+    assert(group.free_rank() == 2);
+
+    std::vector<silex::FactoredElement> values;
+    values.emplace_back(cubic);
+    assert(values[0].push(theta, 3));
+    const unsigned long hits_before =
+            silex::detail::TestHookAccess::reduce_mod_units_retry_bound_hits();
+    silex::detail::TestHookAccess::
+            set_reduce_mod_units_fixed_approximate_coefficients(true);
+    const bool ok = silex::detail::reduce_relation_units_modulo(
+            values, group, embeddings, 32);
+    silex::detail::TestHookAccess::
+            set_reduce_mod_units_fixed_approximate_coefficients(false);
+    const unsigned long hits =
+            silex::detail::TestHookAccess::reduce_mod_units_retry_bound_hits() -
+            hits_before;
+    assert(ok);
+    assert(hits >= 2);
+    if (!ok || hits < 2) {
+        return 1;
+    }
+
+    // value * g^N == theta^3 with N = hits * kReduceModUnitsApproximateRetries.
+    silex::FactoredElement first_generator(cubic);
+    silex::Element g(cubic);
+    silex::Element value(cubic);
+    assert(group.free_generator(first_generator, 0));
+    assert(first_generator.evaluate(g));
+    assert(values[0].evaluate(value));
+    const unsigned long applied =
+            hits * static_cast<unsigned long>(
+                           silex::detail::kReduceModUnitsApproximateRetries);
+    for (unsigned long k = 0; k < applied; ++k) {
+        silex::Element next(cubic);
+        assert(next.multiply(value, g));
+        assert(value.set(next));
+    }
+    silex::Element theta_cubed(cubic);
+    silex::Element theta_squared(cubic);
+    assert(theta_squared.multiply(theta, theta));
+    assert(theta_cubed.multiply(theta_squared, theta));
+    assert(value.equal(theta_cubed));
+    return value.equal(theta_cubed) ? 0 : 1;
+}
+
 // The factored log memo returns exactly what a fresh
 // FactoredElement::logarithmic_embedding call computes.  It stores a result
 // only under a known embedding-cache version, returns it only while that
@@ -16941,6 +17012,7 @@ int main() {
     test_apply_unit_reduction_factor_list();
     test_apply_unit_reduction_wide_merge();
     test_reduce_mod_units_unfit_coefficient_stops();
+    test_reduce_mod_units_approximate_retry_bound_falls_through();
     test_reduce_mod_units_half_integer_tie_stop_rule();
     test_factored_log_memo_matches_direct_call();
     test_factored_log_memo_origin_pair_cache();

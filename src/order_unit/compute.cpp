@@ -3450,6 +3450,16 @@ bool reduce_relation_units_modulo(std::vector<FactoredElement>& values,
                     coefficients, values, group, embeddings, exact,
                     half_integer_tie, precision, unit_log_inverse, memo);
         }
+        // Test seam, off in every real run (see ComputeTestSeams): replace
+        // the coefficients by fixed approximate ones, so a test can reach
+        // the retry bound below.
+        if (coordinates_ok &&
+            ComputeTestSeams::
+                    reduce_mod_units_fixed_approximate_coefficients()) {
+            flint::fmpz_mat_zero(coefficients);
+            flint::fmpz_one(flint::fmpz_mat_entry(coefficients, 0, 0));
+            exact = false;
+        }
         if (coordinates_ok) {
             if (fmpz_matrix_is_zero(coefficients)) {
                 return true;
@@ -3479,6 +3489,7 @@ bool reduce_relation_units_modulo(std::vector<FactoredElement>& values,
             if (++approximate_retries < kReduceModUnitsApproximateRetries) {
                 continue;
             }
+            ComputeTestSeams::count_reduce_mod_units_retry_bound();
             // The retry bound is reached: double the precision, as the
             // reference does after every approximate rounding, or stop at
             // the cap with the values reduced so far (half_integer_tie is

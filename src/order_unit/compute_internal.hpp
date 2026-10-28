@@ -163,6 +163,23 @@ public:
     static bool fail_word_quotient_log_table() noexcept {
         return fail_word_quotient_log_table_.load(std::memory_order_relaxed);
     }
+    // reduce_relation_units_modulo (compute.cpp): true while every pass
+    // whose reduction coordinates succeed should instead apply the fixed
+    // approximate coefficients 1 on the first free generator of the first
+    // value and 0 elsewhere, so the values change on every pass and the
+    // coefficients never settle.  Read once per pass.
+    static bool reduce_mod_units_fixed_approximate_coefficients() noexcept {
+        return reduce_mod_units_fixed_approximate_coefficients_.load(
+                std::memory_order_relaxed);
+    }
+    // reduce_relation_units_modulo: counts the passes that reached
+    // kReduceModUnitsApproximateRetries approximate reductions at one
+    // precision and fell through to the precision doubling.  One relaxed
+    // increment on that cold path; it never changes a result.
+    static void count_reduce_mod_units_retry_bound() noexcept {
+        reduce_mod_units_retry_bound_hits_.fetch_add(
+                1, std::memory_order_relaxed);
+    }
 
 private:
     friend class TestHookAccess;
@@ -172,6 +189,10 @@ private:
     inline static std::atomic<bool> forget_validation_summary_{false};
     inline static std::atomic<bool> continuation_appends_nothing_{false};
     inline static std::atomic<bool> fail_word_quotient_log_table_{false};
+    inline static std::atomic<bool>
+            reduce_mod_units_fixed_approximate_coefficients_{false};
+    inline static std::atomic<unsigned long>
+            reduce_mod_units_retry_bound_hits_{0};
 };
 
 const char* validate_refine_outcome_name(ValidateRefineOutcome outcome)
