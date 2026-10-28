@@ -2016,7 +2016,8 @@ bool reduction_coordinates(flint::FmpzMat& out,
     // round_approx, doubles the precision and takes an unconditional
     // continue, so the approximate coefficients are never applied.  Silex
     // returns them (exact = false) and the caller applies them and retries
-    // at the same precision.  Callers also reduce relation generators and
+    // at the same precision (up to kReduceModUnitsApproximateRetries
+    // times).  Callers also reduce relation generators and
     // unit candidates, so the argument is not about a unit basis only: each
     // output is its input times an exact product of the current unit
     // generators, hence the same principal ideal and, with the current units,

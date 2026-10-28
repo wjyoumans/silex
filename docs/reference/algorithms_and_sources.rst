@@ -1830,9 +1830,9 @@ coefficients are never applied (checked against the v0.38.6 source,
 retries at the same precision.  The loop ends when an exact rounding succeeds,
 when the coefficients are all zero (whether from exact or approximate
 rounding), or, through the branch where the approximate rounding fails, when a
-half-integer tie stops it or the cap is reached; only that failing branch
-changes the precision.  Approximate coefficients need not make progress, so
-the loop could otherwise cycle at one precision.  As a termination bound,
+half-integer tie stops it or the cap is reached.  Two branches change the
+precision: the failing branch and the retry limit described next.
+Approximate coefficients need not make progress, so the loop could otherwise cycle at one precision.  As a termination bound,
 after 10 approximate reductions at one precision (the count of Hecke's
 ``cnt = 10``, which ``reduce_mod_units`` declares at ``Map.jl`` line 614 but
 never reads) Silex doubles the precision as Hecke does, and stops at the cap
@@ -2975,7 +2975,8 @@ the fixed baby and giant step factors are applied with FLINT's
 logarithm.  As a resource cap with no Hecke counterpart, baby-step giant-step
 is taken only while its table has at most ``2^24`` slots (256 MiB, ``ell``
 below about ``2^46``); a larger ``ell`` keeps the shared walk, which returns
-the same logarithm without the table.
+the same logarithm without the table.  The walk takes up to ``ell`` steps, so
+such an ``ell`` is a time cost, not a crash.
 
 ``ResidueFieldQuotientLog::apply`` returns, for ``x`` in ``F_q^*`` with
 ``q = p^f``, the ``i`` in ``[0, ell)`` with ``zeta^i = x^((q - 1)/ell)``,
