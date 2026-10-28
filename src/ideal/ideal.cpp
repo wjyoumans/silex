@@ -980,7 +980,14 @@ bool Ideal::add(const Ideal& left, const Ideal& right) noexcept {
                  flint::FmpzMatConstRef(right.hnf_), i);
     }
 
-    if (!candidate.set_rows(flint::FmpzMatConstRef(rows))) {
+    // `left` and `right` are Ideals of this order holding an HNF, so their
+    // lattices I and J are ideals: every installed route that stores an HNF
+    // either tests closure or builds an ideal by construction, and only the
+    // test hook IdealAccess::set_hnf_direct stores an unchecked matrix.  The
+    // rows span I + J, and for x in I, y in J and w in O, w(x + y) = wx + wy
+    // lies in I + J, so the sum is an ideal and the hnf_is_ideal product test
+    // of set_rows is skipped (assertion builds still run it).
+    if (!candidate.set_known_ideal_rows(flint::FmpzMatConstRef(rows))) {
         return false;
     }
     swap(candidate);

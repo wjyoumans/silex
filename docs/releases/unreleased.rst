@@ -132,6 +132,22 @@ Added
 
 Changed
 -------
+- ``Ideal::add`` stores the Hermite normal form of the sum of two ideals of
+  one order without the closure test that multiplies every pair of basis
+  elements: a sum of ideals is an ideal, so the test cannot fail there.
+  Builds with assertions enabled still run it.  The stored ideal, its norm
+  and every failure case are unchanged.  This speeds up the degree-one prime
+  ideals built for the proven unit-saturation proof.  ``proven`` outputs
+  (167 corpus rows) and ``grh`` outputs (171 rows), with timing keys
+  removed, are identical; the rows that time out do so on both builds.
+  Whole-process callgrind Ir of ``proven`` (busy machine) drops against
+  commit 2eef3e90 by 19.74% on ``multiquadratic_p5_m7_m11`` (25.3% in the
+  class/unit computation after the maximal order), 20.39% on
+  ``multiquadratic_m3_m5_m7``, 30.44% on ``cyclotomic_60_phi16`` and 36.16%
+  on ``tridecic_x13_minus_x_minus_1_proven``, and by more than 5% on 58 of
+  161 measured rows; ``grh`` drops by at most 1.41%, and no measured row
+  rises by more than 0.01%.
+
 - The unit stage of a relation-based class/unit computation starts its
   embedding context from a copy of the certified roots the order's own
   embedding context already isolated for the Minkowski rows of the relation

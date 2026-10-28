@@ -3827,6 +3827,62 @@ int test_contains_lattice_fallback_matches_hnf_reference() {
     return members > 0 && nonmembers > 0 && included > 0 && excluded > 0 ? 0 : 1;
 }
 
+// Ideal::add stores the HNF of the stacked rows of its operands without the
+// hnf_is_ideal closure test (the sum of two ideals of one order is an ideal).
+// It must store what the validating Ideal::set_hnf accepts for the same rows,
+// on maximal and equation orders, including aliased and repeated operands.
+int test_add_matches_checked_hnf_of_stacked_rows() {
+    slong checked_sums = 0;
+    for (slong degree : {2, 3, 4, 6, 8}) {
+        for (slong kind = 0; kind < 6; ++kind) {
+            silex::Order order;
+            silex::Ideal left, right;
+            assert(silex::test::ideal_product::fixture(order, left, right, degree, kind));
+            const slong n = order.degree();
+            silex::Ideal product(order);
+            assert(product.multiply(left, right));
+            const silex::Ideal* pairs[][2] = {{&left, &right}, {&right, &left},
+                                              {&left, &product}, {&left, &left}};
+            for (const auto& pair : pairs) {
+                sflint::FmpzMat top(n, n), bottom(n, n), stacked(2 * n, n);
+                assert(pair[0]->get_hnf(sflint::FmpzMatRef(top)));
+                assert(pair[1]->get_hnf(sflint::FmpzMatRef(bottom)));
+                for (slong i = 0; i < n; ++i) {
+                    for (slong j = 0; j < n; ++j) {
+                        fmpz_set(fmpz_mat_entry(stacked.raw(), i, j),
+                                 fmpz_mat_entry(top.raw(), i, j));
+                        fmpz_set(fmpz_mat_entry(stacked.raw(), n + i, j),
+                                 fmpz_mat_entry(bottom.raw(), i, j));
+                    }
+                }
+                sflint::FmpzMat reduced(2 * n, n), square(n, n);
+                fmpz_mat_hnf(reduced.raw(), stacked.raw());
+                for (slong i = 0; i < n; ++i) {
+                    for (slong j = 0; j < n; ++j) {
+                        fmpz_set(fmpz_mat_entry(square.raw(), i, j),
+                                 fmpz_mat_entry(reduced.raw(), i, j));
+                    }
+                }
+                silex::Ideal checked(order), sum(order);
+                assert(checked.set_hnf(sflint::FmpzMatConstRef(square)));
+                assert(sum.add(*pair[0], *pair[1]));
+                sflint::FmpzMat want(n, n), got(n, n);
+                assert(checked.get_hnf(sflint::FmpzMatRef(want)));
+                assert(sum.get_hnf(sflint::FmpzMatRef(got)));
+                assert(fmpz_mat_equal(want.raw(), got.raw()) != 0);
+                assert(sum.contains(*pair[0]) && sum.contains(*pair[1]));
+
+                silex::Ideal aliased(order);
+                assert(aliased.set(*pair[0]));
+                assert(aliased.add(aliased, *pair[1]));
+                assert(aliased.equal(checked));
+                ++checked_sums;
+            }
+        }
+    }
+    return checked_sums == 5 * 6 * 4 ? 0 : 1;
+}
+
 // The noninstalled detail::IdealAccess::set_known_ideal_hnf hook, which
 // library code uses for lattices that are ideals by construction, stores the
 // same normalized HNF as the checked Ideal::set_hnf for any full-rank basis
@@ -4391,6 +4447,7 @@ int main(int argc, char** argv) {
     assert(test_contains_and_set_hnf_match_hnf_reference() == 0);
     assert(test_contains_ideal_matches_hnf_reference() == 0);
     assert(test_contains_lattice_fallback_matches_hnf_reference() == 0);
+    assert(test_add_matches_checked_hnf_of_stacked_rows() == 0);
     assert(test_set_known_ideal_hnf_matches_set_hnf() == 0);
     assert(test_fractional_from_validated_numerator() == 0);
     assert(test_contains_failure_returns() == 0);
