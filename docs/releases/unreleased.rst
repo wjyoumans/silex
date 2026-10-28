@@ -214,6 +214,20 @@ Changed
   that reach the refined step.  No row is slower by more than 0.02% in
   these runs.
 
+- The residue degrees that the defining-polynomial route reads from the
+  distinct-degree factorization modulo ``p``
+  (``nmod_poly_factor_distinct_deg``) are now kept with the maximal order,
+  so the ``grh`` factor-base bound search, the norm-bounded factor-base
+  build and the Belabas-Friedman index-one sums factor each ``p`` once per
+  order instead of once per phase.  Index and discriminant divisors,
+  cyclotomic closed forms and the root counts of degrees 1 to 3 are not
+  stored.  ``grh`` outputs, with timing keys removed, are identical on 171
+  corpus rows (``cyclotomic_real_163_deg81`` times out on both).
+  Whole-process callgrind Ir of ``grh`` (busy machine, single runs) drops
+  by 5.98% on ``random_d12_h2_s16_proven``, by 6.15% on
+  ``octodecic_x18_minus_x_plus_1_proven``, and by 1% to 6% on 81 rows in
+  all; no row is slower by more than 0.03%.
+
 - ``Ideal::multiply`` on a maximal order, when the two-generator search for
   the product fails, now takes a modular Hermite normal form of the ``n^2``
   basis products modulo the product of the two ideal minima
