@@ -190,6 +190,7 @@ bool logarithmic_embedding(flint::ArbVecRef out,
 
     const Signature sig = embeddings.signature();
     const slong r1 = sig.r1();
+    slong least_accuracy = precision;
     for (slong i = 0; i < places; ++i) {
         const slong root_index = i < r1 ? i : r1 + 2 * (i - r1);
         acb_abs(tmp.data() + i, values.data() + root_index, precision);
@@ -203,8 +204,51 @@ bool logarithmic_embedding(flint::ArbVecRef out,
             embeddings.failed_log_embedding_miss_();
             return false;
         }
+        const slong accuracy = arb_rel_accuracy_bits(tmp.data() + i);
+        if (accuracy < least_accuracy) {
+            least_accuracy = accuracy > 0 ? accuracy : 0;
+        }
+    }
 
-        arb_log(tmp.data() + i, tmp.data() + i, precision);
+    // Working precision of each log.  arb_log already caps its working
+    // precision at the input ball's relative accuracy plus the bit length of
+    // the input's exponent plus MAG_BITS (FLINT src/arb/log.c), so a place
+    // whose absolute value is known to only a few bits is cheap.  An
+    // accurately known place is still logged at the full evaluation
+    // precision, although the vector is no more accurate than its least
+    // accurate place: after cancellation a tiny conjugate of a large unit
+    // can carry thousands of correct bits while its large conjugate carries
+    // the full precision (hundreds of thousands of bits on large real
+    // quadratic regulators).  Apply FLINT's cap with the least relative
+    // accuracy over the places, so every place uses at most
+    //   least_accuracy + bits(exponent of |x_i|) + MAG_BITS
+    // bits.  Since |log x_i| < 2^bits(exponent), the rounding error this
+    // adds to place i is about 2^-(least_accuracy + MAG_BITS), below the
+    // radius 2^-least_accuracy that the least accurate place already
+    // carries, so the largest radius of the vector does not grow.  For the
+    // least accurate place the cap equals FLINT's own cap, so that place,
+    // and every place of the same relative accuracy, is computed exactly as
+    // before.
+    //
+    // Enclosure: arb_log(y, x, p) returns, for every working precision p, a
+    // ball containing log t for every t in the ball x (FLINT's ball
+    // arithmetic contract; the precision only affects the rounding of the
+    // midpoint, which is added to the radius).  So each entry still
+    // encloses log |sigma_i(element)| (or twice it in product mode at a
+    // complex place); only its radius can change.
+    for (slong i = 0; i < places; ++i) {
+        slong log_precision = precision;
+        mag_t lower;
+        mag_init(lower);
+        arb_get_mag_lower(lower, tmp.data() + i);
+        const slong exponent_bits =
+                static_cast<slong>(fmpz_bits(MAG_EXPREF(lower)));
+        mag_clear(lower);
+        if (least_accuracy < precision &&
+            least_accuracy + exponent_bits + MAG_BITS < precision) {
+            log_precision = least_accuracy + exponent_bits + MAG_BITS;
+        }
+        arb_log(tmp.data() + i, tmp.data() + i, log_precision);
     }
 
     if (!out.set_from(flint::ArbVecConstRef(tmp))) {

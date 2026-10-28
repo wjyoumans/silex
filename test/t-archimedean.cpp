@@ -2,6 +2,7 @@
 #include <silex/flint/arb.hpp>
 #include <silex/flint/arb_mat.hpp>
 #include <silex/flint/fmpq.hpp>
+#include <silex/flint/fmpz.hpp>
 #include <silex/flint/fmpq_poly.hpp>
 #include <silex/number_field.hpp>
 
@@ -253,6 +254,48 @@ int test_log_embedding() {
     return 0;
 }
 
+// A unit with a large conjugate and a tiny one: at 8192 bits the large
+// conjugate is evaluated to about 8192 correct bits but the tiny one, after
+// cancellation, to only about 3100.  The log of each place must still
+// enclose the true value, and the accurate place must not end up with a
+// wider ball than the inaccurate one.
+int test_log_embedding_unbalanced_accuracy() {
+    sflint::FmpqPoly polynomial;
+    poly_x2_minus(polynomial, 2);
+    silex::NumberField field = field_by_polynomial(polynomial);
+    silex::EmbeddingContext embeddings(field);
+    silex::Element base(field);
+    element_one_plus_theta(base);
+    silex::Element unit(field);
+    sflint::Fmpz exponent;
+    sflint::fmpz_set_si(sflint::FmpzRef(exponent), 2000);
+    assert(unit.pow_fmpz(base, sflint::FmpzConstRef(exponent)));
+
+    const slong precision = 8192;
+    sflint::ArbVec logs(2);
+    assert(logarithmic_embedding(sflint::ArbVecRef(logs), embeddings, unit,
+                                 silex::LogEmbeddingMode::plain, precision));
+
+    // log|(1 +- sqrt 2)^2000| = +-2000 log(1 + sqrt 2).
+    sflint::Arb expected;
+    sflint::arb_sqrt_ui(expected, 2, 2 * precision);
+    sflint::arb_add_ui(expected, expected, 1, 2 * precision);
+    sflint::arb_log(expected, expected, 2 * precision);
+    ::arb_mul_si(expected.raw(), expected.raw(), 2000, 2 * precision);
+    sflint::Arb negated;
+    sflint::arb_neg(negated, expected);
+
+    const slong large = ::arf_sgn(arb_midref(logs.data() + 0)) > 0 ? 0 : 1;
+    const slong small = 1 - large;
+    assert(::arb_contains(logs.data() + large, expected.raw()) != 0);
+    assert(::arb_contains(logs.data() + small, negated.raw()) != 0);
+    assert(::arb_rel_accuracy_bits(logs.data() + small) > 3000);
+    assert(::mag_cmp(arb_radref(logs.data() + large),
+                     arb_radref(logs.data() + small)) <= 0);
+    assert(log_sum_overlaps_abs_norm(logs, unit, precision));
+    return 0;
+}
+
 int test_minkowski_embedding() {
     sflint::FmpqPoly polynomial;
     sflint::Arb sum;
@@ -433,6 +476,7 @@ int main() {
     assert(test_absolute_quadratic_and_cubic() == 0);
     assert(test_log_embedding() == 0);
     assert(test_log_embedding_stable_across_refine() == 0);
+    assert(test_log_embedding_unbalanced_accuracy() == 0);
     assert(test_minkowski_embedding() == 0);
     assert(test_undefined_field_failure() == 0);
     assert(test_nonsquarefree_failure() == 0);
