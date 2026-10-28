@@ -371,10 +371,16 @@ bool zeta_class_regulator_product_index_one_with_diagnostics(
 // where T bounds the sum over prime ideals of norm in [X_c, X_m) with at
 // most n ideals of norm p and floor(n/f) of norm p^f above each prime p,
 // the primes taken in short blocks at the value of the block start.  The
-// test
-// evaluates that bound in ball arithmetic and compares its lower endpoint
-// with the target's upper endpoint.  False means only "not proven": the
-// route may still fail.
+// test evaluates that bound in ball arithmetic and compares its lower
+// endpoint with the target's upper endpoint.  False means only "not
+// proven": the route may still fail.
+//
+// The proof below X_c is not a stand-alone certificate: it assumes the
+// Theorem 7 scan reproduces its balls bit-exactly.  That holds only because
+// the scan adds identical balls whatever the residue-degree cache holds, so
+// both residue-degree paths (cached and uncached) must issue the same
+// additions.  A change to the scan or to bf_theorem7_add_prime that breaks
+// this also breaks the skip.
 bool zeta_bf_index_one_target_unreachable(
         const Order& order,
         const ZetaBfRouteAudit& index_one_audit,
