@@ -3345,6 +3345,21 @@ Changed
   ``cyclotomic_real_31_deg15`` 2.5% fewer (6.531e8 to 6.369e8).  No timing
   has been measured.
 
+- The relation-saturation beta coefficients of a ``proven`` class/unit
+  computation solve each invariant's row from the extension route's image
+  rows once per presentation and reuse it for every tested ``ell``, instead
+  of repeating the solve for each ``ell``.  Each row is the unique solution
+  of the same system whatever the other rows of the solve, and the exact
+  check ``c * A == d_i * (V^-1)_i`` still runs on every solved row, so the
+  rows are unchanged.  ``proven`` outputs, with timing keys removed, are
+  identical on 166 corpus rows (6 rows did not finish within 300 s on either
+  build and were not compared).  Whole-process callgrind Ir of ``proven``
+  (busy machine) drops by 4.79% on ``real_quadratic_d10000000005``
+  (1.2705e9 to 1.2097e9); ``random_d9_h4_s8_proven`` (-0.03%) and
+  ``pure_x12_plus_7`` (-0.07%) are unchanged, and
+  ``imaginary_quadratic_d10000000799`` is 0.03% higher (1.26708e9 to
+  1.26741e9).  No timing has been measured.
+
 Fixed
 -----
 
