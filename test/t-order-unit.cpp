@@ -16678,8 +16678,11 @@ silex::OrderUnitGroup power_unit_sublattice(const silex::OrderUnitGroup& units,
 // x^3 - x^2 - 2x + 1 (h = 1, unit rank 2), for unit subgroups of index
 // e^2.  The coarse index-one value does not show index one, so the refined
 // Belabas-Friedman value (log radius below 1/max(8, 2B), B the coarse
-// bound) is tried.  For e = 2 its index enclosure holds the single integer
-// 4 and gives the bound; the default hR is not computed, and the bound is
+// bound) is tried; for e = 2 the coarse enclosure holds more than one
+// integer, so the coarse value does not decide the bound on its own
+// (test_grh_index_bound_coarse_value_single_integer covers that case).
+// For e = 2 the refined index enclosure holds the single integer 4 and
+// gives the bound; the default hR is not computed, and the bound is
 // the one the default hR gives.  For e = 40 no cutoff up to the default
 // maximum reaches that radius, so the default hR gives the bound.  For
 // e = 725 the refined value is not tried (q >= 2^20).
@@ -16822,6 +16825,112 @@ int test_grh_index_bound_refined_value_before_default() {
     default_bound(index_525625, expected);
     assert(sflint::fmpz_cmp_ui(sflint::FmpzConstRef(expected), 525625) > 0);
     assert(sflint::fmpz_equal(sflint::FmpzConstRef(large_bound),
+                              sflint::FmpzConstRef(expected)));
+    return 0;
+}
+
+// The grh index bound of a validation pass on Q(sqrt 210) (unit rank 1)
+// for the unit subgroup of index 2, the square of the fundamental unit.
+// The coarse index-one value (log radius below 1/4) does not show index
+// one, but its index enclosure already holds the single integer 2, so it
+// gives the bound: neither the refined value nor the default hR is
+// computed, value() stays the coarse value, and the bound is the one the
+// default hR gives.
+int test_grh_index_bound_coarse_value_single_integer() {
+    silex::NumberField field = quadratic_field(210);
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation));
+
+    silex::ClassGroupComputeOptions options;
+    options.requested_certification = silex::CertificationMode::grh;
+    sflint::Fmpz bound;
+    assert(silex::factor_base_class_group_bound(sflint::FmpzRef(bound),
+                                                order));
+    if (sflint::fmpz_cmp_ui(sflint::FmpzConstRef(bound), 2) < 0) {
+        sflint::fmpz_set_ui(sflint::FmpzRef(bound), 2);
+    }
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    silex::detail::ClassUnitTransactionReport audit;
+    assert(silex::detail::compute_class_unit_transaction(
+            units, class_group, order, sflint::FmpzConstRef(bound), options,
+            128, audit));
+    assert(audit.final_result_published);
+    assert(units.free_rank() == 1);
+
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    ScopeCounter refined_runs;
+    refined_runs.label = "unit_group.validation_analytic_index_bound."
+                         "ensure_refined_product";
+    ScopeCounter default_runs;
+    default_runs.label =
+            "unit_group.validation_analytic_index_bound.ensure_product";
+    ScopeCounter coarse_decisions;
+    coarse_decisions.label = "unit_group.validation_analytic_index_bound."
+                             "coarse_product_single_integer";
+    struct Counters {
+        ScopeCounter* refined;
+        ScopeCounter* fallback;
+        ScopeCounter* coarse;
+    } counters{&refined_runs, &default_runs, &coarse_decisions};
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(
+                    silex::DiagnosticsModule::unit_group),
+            [](void* user, silex::DiagnosticsModule module,
+               silex::ProfileEvent event, const char* file,
+               const char* label) noexcept {
+                Counters* all = static_cast<Counters*>(user);
+                scope_begin_callback(all->refined, module, event, file,
+                                     label);
+                scope_begin_callback(all->fallback, module, event, file,
+                                     label);
+                if (event == silex::ProfileEvent::event && label != nullptr &&
+                    std::strcmp(label, all->coarse->label) == 0) {
+                    ++all->coarse->count;
+                }
+            },
+            &counters);
+
+    silex::OrderUnitGroup index_two =
+            power_unit_sublattice(units, order, field, 2);
+    index_two.set_diagnostics(&diagnostics);
+    silex::detail::AnalyticClassRegulatorCache analytic_cache;
+    sflint::Fmpz coarse_bound;
+    assert(silex::detail::analytic_index_bound_for_validation(
+            coarse_bound, index_two, class_group, analytic_cache, order, 128,
+            true));
+    index_two.set_diagnostics(nullptr);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    assert(coarse_decisions.count == 1);
+    assert(refined_runs.count == 0);
+    assert(default_runs.count == 0);
+#endif
+    assert(sflint::fmpz_cmp_ui(sflint::FmpzConstRef(coarse_bound), 1) > 0);
+    // value() is still the coarse value: its enclosure holds the single
+    // integer, its audit is the coarse one, and ensure_index_one() (which
+    // declines once the default hR is cached) serves it again.
+    assert(silex::detail::validation_index_enclosure_has_single_integer(
+            index_two, class_group, analytic_cache.value(), 128));
+    const silex::detail::ZetaBfRouteAudit* coarse_audit =
+            analytic_cache.value_bf_audit();
+    assert(coarse_audit != nullptr);
+    sflint::Arb quarter;
+    sflint::arb_set_d(quarter, 0.25);
+    assert(sflint::arb_lt(coarse_audit->error_bound, quarter));
+    assert(coarse_audit->theorem7_log_radius_denominator == 4);
+    assert(analytic_cache.ensure_index_one(order, 128));
+
+    silex::detail::AnalyticClassRegulatorCache default_cache;
+    assert(default_cache.ensure(order, 128, nullptr,
+                                class_group.factor_base(), false, true));
+    sflint::Fmpz expected;
+    assert(silex::detail::analytic_index_bound_for_validation(
+            expected, index_two, class_group, default_cache, order, 128,
+            true));
+    assert(sflint::fmpz_equal(sflint::FmpzConstRef(coarse_bound),
                               sflint::FmpzConstRef(expected)));
     return 0;
 }
@@ -17010,6 +17119,7 @@ int main() {
     test_grh_validation_stop_retries_coarse_index_one();
     test_grh_coarse_stop_records_coarse_bf_audit();
     test_grh_index_bound_refined_value_before_default();
+    test_grh_index_bound_coarse_value_single_integer();
     test_validation_index_enclosure_single_integer_rule();
     test_grh_validation_saturation_memo_replays_unchanged_pass();
     test_grh_validation_saturation_memo_invalidated_by_change();

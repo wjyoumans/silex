@@ -362,24 +362,31 @@ bool validation_index_enclosure_has_single_integer(
 namespace {
 
 // The refined step of the grh index bound, between the coarse index-one
-// value and the default hR: a Belabas-Friedman hR with log radius below
-// 1/q, q = max(8, 2 B) for the coarse value's index bound B
-// (ensure_index_one_refined), used only when the enclosure of
+// value and the default hR.  It first applies the single-integer rule
+// below to the coarse value itself, which value() still is: when the
+// enclosure of h_cand R_cand / hR from the coarse value already holds a
+// single integer, that value gives the bound and no narrower value is
+// computed.  Otherwise it takes a Belabas-Friedman hR with log radius
+// below 1/q, q = max(8, 2 B) for the coarse value's index bound B
+// (ensure_index_one_refined), used only when its enclosure of
 // h_cand R_cand / hR holds a single integer k.  With the generation
 // prerequisites the quotient is the class/unit index, an integer, and
-// under GRH both values enclose it (Belabas-Friedman 2015, Theorem 7 for
-// this one, Theorem 1 for the default route), so it is k, and the index
-// bound this value gives, the ceiling of the upper endpoint, is the one the
-// default hR gives whenever that hR's upper endpoint also lies in
-// (k, k + 1) (or both shortcut to index one).  q only schedules the work:
-// with true index k <= B and relative width about 2/q the enclosure is at
-// most about one unit wide.  Returns false, leaving the default hR to
-// decide, when the prerequisites fail, B is at least 2^19 (q >= 2^20
-// leaves the tail target 1/q - 2^-20 nonpositive), the value is
-// unavailable (no cutoff up to the default maximum reaches 1/q; the cache
-// records that without the scan when the coarse value's audit proves it,
-// zeta_bf_index_one_target_unreachable), or the enclosure holds two or
-// more integers or none.
+// under GRH every one of these values encloses it (Belabas-Friedman 2015,
+// Theorem 7 for the coarse and refined values, Theorem 1 for the default
+// route), so it is k, and the index bound the deciding value gives, the
+// ceiling of its upper endpoint, is the one the default hR gives whenever
+// that hR's upper endpoint also lies in (k, k + 1) (or both shortcut to
+// index one).  The coarse value never holds the single integer one here:
+// it would have shown index one (validation_index_bound_from_product).
+// q only schedules the work: with true index k <= B and relative width
+// about 2/q the enclosure is at most about one unit wide.  Returns false,
+// leaving the default hR to decide, when the prerequisites fail, the
+// coarse enclosure does not hold a single integer and B is at least 2^19
+// (q >= 2^20 leaves the tail target 1/q - 2^-20 nonpositive), the refined
+// value is unavailable (no cutoff up to the default maximum reaches 1/q;
+// the cache records that without the scan when the coarse value's audit
+// proves it, zeta_bf_index_one_target_unreachable), or its enclosure holds
+// two or more integers or none.
 bool refined_index_bound_for_validation(
         flint::Fmpz& index_bound,
         const OrderUnitGroup& units,
@@ -389,8 +396,22 @@ bool refined_index_bound_for_validation(
         slong precision,
         const flint::Fmpz& coarse_index_bound) noexcept {
     constexpr ulong kMinDenominator = 2 * kZetaBfIndexOneLogRadiusDenominator;
-    if (!validation_integer_index_prerequisites(class_group, true) ||
-        flint::fmpz_sgn(flint::FmpzConstRef(coarse_index_bound)) <= 0 ||
+    if (!validation_integer_index_prerequisites(class_group, true)) {
+        return false;
+    }
+    // value() is the coarse value here (coarse_index_one_outcome), and
+    // coarse_index_bound is the bound it gives.
+    if (validation_index_enclosure_has_single_integer(
+                units, class_group, analytic_cache.value(), precision)) {
+        SILEX_PROFILE_EVENT(
+                units.diagnostics(), DiagnosticsModule::unit_group,
+                "unit_group.validation_analytic_index_bound."
+                "coarse_product_single_integer");
+        flint::fmpz_set(flint::FmpzRef(index_bound),
+                        flint::FmpzConstRef(coarse_index_bound));
+        return true;
+    }
+    if (flint::fmpz_sgn(flint::FmpzConstRef(coarse_index_bound)) <= 0 ||
         flint::fmpz_cmp_ui(flint::FmpzConstRef(coarse_index_bound),
                            kZetaBfIndexOneLogRadiusDenominatorLimit / 2) >=
                 0) {
@@ -467,9 +488,10 @@ bool analytic_index_bound_for_validation(
     // A grh request first tries a Belabas-Friedman hR that is only accurate
     // enough to recognize index one (log radius below 1/4; Belabas-Friedman
     // 2015, p. 1, footnote 1, and Theorem 7 for the cutoff).  Index one
-    // from it is accepted as is.  When it shows an index above one, a
-    // narrower value of the same route gives the bound if its enclosure
-    // holds a single integer (refined_index_bound_for_validation).  Any
+    // from it is accepted as is.  When it shows an index above one, it
+    // gives the bound itself if its enclosure holds a single integer, and
+    // otherwise a narrower value of the same route does if its enclosure
+    // does (refined_index_bound_for_validation).  Any
     // other outcome is recomputed below from the default hR, so every
     // failure comes from the same value as before.
     if (accept_grh_generation) {

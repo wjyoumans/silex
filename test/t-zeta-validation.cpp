@@ -907,11 +907,13 @@ bool check_grh_transaction_records_index_one_audit(
                    0;
 }
 
-// Counts the begin events of two profiling scopes of the grh index bound:
-// the refined value and the default hR.
+// Counts the begin events of two profiling scopes of the grh index bound,
+// the refined value and the default hR, and the events of a bound that the
+// coarse value decides on its own.
 struct IndexBoundScopeCounts {
     slong refined = 0;
     slong fallback = 0;
+    slong coarse = 0;
 };
 
 void count_index_bound_scopes(void* user,
@@ -920,6 +922,13 @@ void count_index_bound_scopes(void* user,
                               const char*,
                               const char* label) noexcept {
     IndexBoundScopeCounts* counts = static_cast<IndexBoundScopeCounts*>(user);
+    if (event == silex::ProfileEvent::event && label != nullptr &&
+        std::strcmp(label,
+                    "unit_group.validation_analytic_index_bound."
+                    "coarse_product_single_integer") == 0) {
+        ++counts->coarse;
+        return;
+    }
     if (event != silex::ProfileEvent::begin_scope || label == nullptr) {
         return;
     }
@@ -935,7 +944,8 @@ void count_index_bound_scopes(void* user,
 }
 
 // Runs a grh transaction on `setup` with the native options, counting the
-// refined and default index-bound scopes when profiling is compiled in.
+// refined and default index-bound scopes and the coarse decisions when
+// profiling is compiled in.
 bool run_grh_transaction_counting_index_bound_scopes(
         silex::ClassGroupContext& class_group,
         IndexBoundScopeCounts& counts,
@@ -962,16 +972,21 @@ bool run_grh_transaction_counting_index_bound_scopes(
             sflint::FmpzConstRef(factor_base_bound), options, 128, report);
 }
 
-// The cubic field x^3 + x + 200 has a coarse cutoff of 882 but a candidate
-// index bound above one at the first test.  The refined value decides that
-// bound (the default hR is never computed), and the final test on the
-// accepted pair shows index one from the coarse value, so the transaction
-// records the coarse audit (cutoff 882).  Before the progressive refined
-// step the default value was cached by the first test and its audit (the
-// default cutoff) was recorded instead.
-bool check_grh_transaction_records_coarse_audit_after_refined_bound(
-        const FieldSetup& setup) noexcept {
-    constexpr ulong coarse_cutoff = 882;
+// A grh transaction whose first test shows a candidate index bound above
+// one from the coarse value (cutoff `coarse_cutoff`).  On x^3 + x + 200
+// (coarse cutoff 882) the coarse index enclosure already holds a single
+// integer, so the coarse value decides that bound (`refined_decides`
+// false); on x^4 - 7 (coarse cutoff 531) it holds more than one and the
+// refined value decides it (`refined_decides` true).  Either way the
+// default hR is never computed, and the final test on the accepted pair
+// shows index one from the coarse value, so the transaction records the
+// coarse audit.  Before the progressive refined step the default value was
+// cached by the first test and its audit (the default cutoff) was recorded
+// instead.
+bool check_grh_transaction_records_coarse_audit_after_index_bound(
+        const FieldSetup& setup,
+        ulong coarse_cutoff,
+        bool refined_decides) noexcept {
     silex::detail::AnalyticClassRegulatorCache cache;
     if (!cache.ensure_index_one(setup.maximal_order, 128)) {
         return false;
@@ -993,9 +1008,12 @@ bool check_grh_transaction_records_coarse_audit_after_refined_bound(
         return false;
     }
 #if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
-    if (counts.refined == 0 || counts.fallback != 0) {
+    if ((counts.refined != 0) != refined_decides || counts.fallback != 0 ||
+        (counts.coarse != 0) == refined_decides) {
         return false;
     }
+#else
+    static_cast<void>(refined_decides);
 #endif
     const std::optional<silex::ClassGroupZetaBfProofRecord> record =
             class_group.zeta_bf_proof_record();
@@ -1953,8 +1971,12 @@ int main() {
                            setup_from_coefficients(simplest_cubic_a6, 3)) ||
                    !check_grh_transaction_records_index_one_audit(
                            setup_from_coefficients(x2_minus_210, 2)) ||
-                   !check_grh_transaction_records_coarse_audit_after_refined_bound(
-                           setup_from_coefficients(x3_plus_x_plus_200, 3)) ||
+                   !check_grh_transaction_records_coarse_audit_after_index_bound(
+                           setup_from_coefficients(x3_plus_x_plus_200, 3),
+                           882, false) ||
+                   !check_grh_transaction_records_coarse_audit_after_index_bound(
+                           setup_from_coefficients(x4_minus_7, 4), 531,
+                           true) ||
                    !check_grh_transaction_records_default_audit(
                            setup_from_coefficients(x2_minus_x_minus_2500000001,
                                                    2)) ||

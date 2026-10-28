@@ -181,6 +181,21 @@ Changed
   ``multiquadratic_m3_m5_m7`` (+0.04%) and
   ``nonadecic_x19_minus_x_minus_1_proven`` (+0.03%).
 
+- The ``grh`` index bound used by validation now stops at the coarse
+  Belabas-Friedman index-one value when that value does not show index one
+  but its index enclosure already holds a single integer; the refined value
+  and the default ``hR`` are then not computed.  Otherwise the refined value
+  and the default ``hR`` decide as before.  ``grh`` outputs, with timing
+  keys removed, are identical on 171 corpus rows, including published index
+  bounds and ``class_group.zeta_bf_proof_record``
+  (``cyclotomic_real_163_deg81`` times out on both).  Whole-process
+  callgrind Ir of ``grh`` (busy machine) drops by 33.30% on
+  ``real_quadratic_d100000001``, 25.07% on
+  ``imaginary_quadratic_d100000000000319``, 18.28% on
+  ``quintic_disc401370255_proven``, 17.45% on ``cubic_disc1080004_proven``
+  and 1.42% to 12.54% on 12 further rows that reach the refined step.  No
+  row is slower by more than 0.02%.
+
 - ``Ideal::multiply`` on a maximal order, when the two-generator search for
   the product fails, now takes a modular Hermite normal form of the ``n^2``
   basis products modulo the product of the two ideal minima
