@@ -589,6 +589,20 @@ class ZetaTestEntry {
                                         ulong cutoff,
                                         slong precision) noexcept;
 
+    // Test entry: the grh Theorem 7 cutoff scan of the index-one route (at
+    // 64 bits, up to `max_cutoff`) for `tail_target`, with the
+    // double-precision step screen when `screen` is true and with every step
+    // evaluated in Arb otherwise.  Writes the selected cutoff, its bound, the
+    // prime-ideal sum there and the number of screened (skipped) steps.
+    static bool bf_theorem7_cutoff_scan(ulong& cutoff,
+                                        flint::ArbRef bound,
+                                        flint::ArbRef prime_sum,
+                                        ulong& screened_steps,
+                                        const Order& order,
+                                        const flint::Arb& tail_target,
+                                        ulong max_cutoff,
+                                        bool screen) noexcept;
+
     // Test entry: `grh_factor_base_bound_with_diagnostics` with `stop_bound`
     // in place of Bach's bound, both as the stop bound of the BDF search and
     // as the bound the BDF bound is compared with.  A stop bound below the

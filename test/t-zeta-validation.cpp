@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <cstddef>
 #include <cstring>
 #include <optional>
@@ -731,6 +732,140 @@ bool check_theorem7_bound_reference() noexcept {
                    sflint::ArbRef(unused), cubic.maximal_order, 9, 128) &&
            !silex::detail::TestHookAccess::zeta_bf_theorem7_error_bound(
                    sflint::ArbRef(unused), cubic.maximal_order, 280, 128);
+}
+
+// The grh Theorem 7 cutoff scan screens steps in double precision and skips
+// the Arb evaluation of those certainly above the target.  The screened scan
+// must agree with the scan that evaluates every step in Arb: the same
+// success, cutoff, bound and prime sum.  Targets are the index-one tail
+// targets 1/q - 2^-20, a target below every bound up to the cap (both scans
+// fail), a zero target (no screen), and targets at and around the bound the
+// scan computes at a selected cutoff, down to relative distances near the
+// screen's 2^-30 margin, so the first cutoff below the target is a step
+// boundary decided by a few bits.
+bool theorem7_screen_agrees(const silex::Order& order,
+                            const sflint::Arb& target,
+                            ulong max_cutoff,
+                            ulong& screened_steps) noexcept {
+    ulong cutoff[2] = {0, 0};
+    sflint::Arb bound[2];
+    sflint::Arb prime_sum[2];
+    ulong steps[2] = {0, 0};
+    bool ok[2] = {false, false};
+    for (int screen = 0; screen < 2; ++screen) {
+        ok[screen] = silex::detail::TestHookAccess::
+                zeta_bf_select_theorem7_cutoff(
+                        cutoff[screen], sflint::ArbRef(bound[screen]),
+                        sflint::ArbRef(prime_sum[screen]), steps[screen],
+                        order, target, max_cutoff, screen != 0);
+    }
+    screened_steps += steps[1];
+    if (steps[0] != 0 || ok[0] != ok[1]) {
+        return false;
+    }
+    return !ok[0] ||
+           (cutoff[0] == cutoff[1] &&
+            ::arb_equal(bound[0].raw(), bound[1].raw()) != 0 &&
+            ::arb_equal(prime_sum[0].raw(), prime_sum[1].raw()) != 0);
+}
+
+// The scan's own bound at the cutoff it selects for `target`, or false.
+bool theorem7_scan_bound(sflint::Arb& bound,
+                         ulong& cutoff,
+                         const silex::Order& order,
+                         const sflint::Arb& target) noexcept {
+    sflint::Arb prime_sum;
+    ulong steps = 0;
+    return silex::detail::TestHookAccess::zeta_bf_select_theorem7_cutoff(
+            cutoff, sflint::ArbRef(bound), sflint::ArbRef(prime_sum), steps,
+            order, target, 20000, false);
+}
+
+bool check_theorem7_screen(const FieldSetup& setup) noexcept {
+    const silex::Order& order = setup.maximal_order;
+    ulong screened = 0;
+    sflint::Arb target;
+    for (ulong q : {4UL, 8UL, 64UL, 1024UL}) {
+        sflint::arb_one(target);
+        sflint::arb_div_ui(target, target, q, 64);
+        sflint::Arb reserve;
+        sflint::arb_one(reserve);
+        sflint::arb_mul_2exp_si(reserve, reserve, -20);
+        sflint::arb_sub(target, target, reserve, 64);
+        if (!theorem7_screen_agrees(order, target, 20000, screened)) {
+            return false;
+        }
+    }
+    // The coarse target skips most steps.
+    if (screened == 0) {
+        return false;
+    }
+    // Below every bound up to the cap, and a zero target.
+    sflint::arb_one(target);
+    sflint::arb_mul_2exp_si(target, target, -40);
+    if (!theorem7_screen_agrees(order, target, 20000, screened)) {
+        return false;
+    }
+    sflint::arb_zero(target);
+    if (!theorem7_screen_agrees(order, target, 2000, screened)) {
+        return false;
+    }
+
+    // Around the scan's bound at the cutoff one step below the coarse one.
+    sflint::Arb bound;
+    ulong cutoff = 0;
+    sflint::arb_set_d(target, 0.25);
+    if (!theorem7_scan_bound(bound, cutoff, order, target) || cutoff < 81) {
+        return false;
+    }
+    sflint::Arb earlier;
+    if (!silex::detail::TestHookAccess::zeta_bf_theorem7_error_bound(
+                sflint::ArbRef(earlier), order, cutoff - 9, 64)) {
+        return false;
+    }
+    sflint::Arf upper;
+    sflint::arb_get_ubound_arf(upper, earlier, 64);
+    ::arb_set_arf(target.raw(), upper.raw());
+    sflint::Arb scale;
+    sflint::arb_set_d(scale, 1.0 + std::ldexp(1.0, -30));
+    sflint::arb_mul(target, target, scale, 64);
+    ::arb_get_mid_arb(target.raw(), target.raw());
+    ulong selected = 0;
+    if (!theorem7_scan_bound(bound, selected, order, target)) {
+        return false;
+    }
+    sflint::arb_get_ubound_arf(upper, bound, 64);
+    sflint::Arb edge;
+    ::arb_set_arf(edge.raw(), upper.raw());
+    // edge (1 + sign 2^-k): the step is decided by the last bits for large
+    // k, lies at the screen's 2^-30 margin for k near 30, and near the gap
+    // between the screen's lower bound and the bound (its beta term drops
+    // a relative 1/(3 r^2)) for small k.
+    const slong exponents[] = {60, 40, 32, 31, 30, 29, 28, 24, 20, 16,
+                               14,  12, 10,  8,  6,  4};
+    sflint::Arb offset;
+    for (int sign = -1; sign <= 1; ++sign) {
+        for (slong exponent : exponents) {
+            sflint::arb_mul_2exp_si(offset, edge, -exponent);
+            if (sign < 0) {
+                sflint::arb_sub(target, edge, offset, 128);
+            } else if (sign > 0) {
+                sflint::arb_add(target, edge, offset, 128);
+            } else {
+                sflint::arb_set(target, edge);
+            }
+            ::arb_get_mid_arb(target.raw(), target.raw());
+            if (!theorem7_screen_agrees(order, target, 20000, screened)) {
+                return false;
+            }
+        }
+    }
+    // The ball itself as the target, and its midpoint.
+    if (!theorem7_screen_agrees(order, bound, 20000, screened)) {
+        return false;
+    }
+    ::arb_get_mid_arb(target.raw(), bound.raw());
+    return theorem7_screen_agrees(order, target, 20000, screened);
 }
 
 // The index-one value: the least multiple of 9 whose Theorem 7 bound is
@@ -1963,6 +2098,16 @@ int main() {
                    !check_bdf_search_stop() ||
                    !check_bdf_failure_note() ||
                    !check_theorem7_bound_reference() ||
+                   !check_theorem7_screen(
+                           setup_from_coefficients(simplest_cubic_a6, 3)) ||
+                   !check_theorem7_screen(
+                           setup_from_coefficients(x2_minus_210, 2)) ||
+                   !check_theorem7_screen(
+                           setup_from_coefficients(x4_minus_7, 4)) ||
+                   !check_theorem7_screen(
+                           setup_from_coefficients(d12_coefficients, 12)) ||
+                   !check_theorem7_screen(
+                           setup_from_coefficients(phi19_coefficients, 18)) ||
                    !check_index_one_products() ||
                    !check_index_one_cache(
                            setup_from_coefficients(simplest_cubic_a6, 3),

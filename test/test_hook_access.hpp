@@ -623,6 +623,19 @@ public:
                                                       precision);
     }
 
+    static bool zeta_bf_select_theorem7_cutoff(ulong& cutoff,
+                                               flint::ArbRef bound,
+                                               flint::ArbRef prime_sum,
+                                               ulong& screened_steps,
+                                               const Order& order,
+                                               const flint::Arb& tail_target,
+                                               ulong max_cutoff,
+                                               bool screen) noexcept {
+        return ZetaTestEntry::bf_theorem7_cutoff_scan(
+                cutoff, bound, prime_sum, screened_steps, order, tail_target,
+                max_cutoff, screen);
+    }
+
     static bool zeta_grh_factor_base_bound_with_stop(
             flint::FmpzRef out,
             const Order& order,

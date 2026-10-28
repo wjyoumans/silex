@@ -4345,6 +4345,128 @@ bool bf_theorem7_error_bound(flint::Arb& out,
     return flint::arb_is_finite(out) && flint::arb_is_positive(out);
 }
 
+// A double-precision screen for the Theorem 7 cutoff scan.  At each cutoff
+// the scan needs only to know whether the bound is below the tail target;
+// most steps are far above it.  The screen computes a lower bound for the
+// exact Theorem 7 value B(X) in double precision and skips the Arb
+// evaluation of bf_theorem7_error_bound when that lower bound, with a
+// safety margin, is above the target's upper bound.  It never accepts a
+// cutoff: every accepted cutoff is still the one whose Arb bound is below
+// the target, so the selected cutoff, the bound and the prime sum are those
+// of the unscreened scan.
+//
+// Lower bound.  With t = log(X/9) and r = X/9 (an integer at least 2),
+//   B(X) = 2.324 ((2 sigma - 1) delta (1 + 3.88/t)
+//                 + 4.26 (n - 1) beta(t) / sqrt(X)) / (sqrt(X) log(3X))
+// (bf_theorem7_error_bound).  The screen replaces 2 sigma - 1 and delta by
+// lower bounds of their balls, rounded down to doubles (arf_get_d with
+// ARF_RND_FLOOR, a directed rounding), and beta(t) by 1/2 + 1/t, which is a
+// lower bound because r log((r + 1)/(r - 1)) = 2 r artanh(1/r) >= 2.  Every
+// term is then nonnegative and nondecreasing in the replaced quantities, so
+// the same expression with exact logarithms, square roots and decimal
+// constants, B_lo, satisfies B_lo <= B(X).
+//
+// Rounding.  The double evaluation of B_lo has 3 decimal constants rounded
+// to nearest, 2 libm logarithms, one correctly rounded square root and
+// about 15 rounded operations on positive values (X < 2^32 and 3X are
+// exact; the inputs above are exact doubles).  With libm's log within a few
+// ulps, its relative error is below 30 * 2^-52 < 2^-47.  The threshold is
+// the target's upper bound T_hi (rounded up, ARF_RND_CEIL) times
+// (1 + 2^-30), itself rounded at most 2^-53 relative.  So B_d > threshold
+// gives B(X) >= B_lo >= B_d (1 - 2^-47) > T_hi (1 + 2^-30)(1 - 2^-53)
+// (1 - 2^-47) > T_hi: the exact bound is above every point of the target,
+// and since the Arb ball contains the exact bound, arb_lt(bound, target) is
+// false.  The 2^-30 margin is 2^17 times the error bound, so it holds even
+// if libm's log were wrong by thousands of ulps.
+//
+// Failure semantics.  The screen computes delta's ball exactly as
+// bf_theorem7_error_bound does and fails where it fails (delta not finite
+// or not positive), so that failure, the one a large prime sum reaches, is
+// unchanged.  It skips only when delta's ball has relative width below
+// 2^-20, the precision is at least 64 bits and X < 2^32; the other factors
+// of the bound are then positive balls of relative radius near 2^-precision
+// (1/log(X/9), with log(X/9) >= log 2, and beta, whose log difference is at
+// least 2/r > 2^-28 against radii near 2^-precision log r), so the Arb bound
+// at a skipped step would have been finite and positive, and the scan would
+// have moved on.
+struct BfTheorem7Screen {
+    bool enabled = false;
+    double sigma_scale_lower = 0.0;  // lower bound of 2 sigma - 1
+    double beta_coefficient = 0.0;   // 4.26 (n - 1)
+    double threshold = 0.0;          // T_hi (1 + 2^-30)
+};
+
+constexpr slong kBfScreenMinPrecision = WORD(64);
+constexpr ulong kBfScreenMaxCutoff = UWORD(1) << 32;
+
+void bf_theorem7_screen_init(BfTheorem7Screen& out,
+                             const BfTheorem7Context& context,
+                             const flint::Arb& tail_target,
+                             slong precision) noexcept {
+    out.enabled = false;
+    if (precision < kBfScreenMinPrecision || context.degree < 1 ||
+        !flint::arb_is_finite(tail_target) ||
+        !flint::arb_is_finite(context.sigma_scale)) {
+        return;
+    }
+    flint::Arf bound;
+    flint::arb_get_ubound_arf(bound, tail_target, precision);
+    const double target_upper = flint::arf_get_d(bound, ARF_RND_CEIL);
+    flint::arb_get_lbound_arf(bound, context.sigma_scale, precision);
+    const double sigma_scale_lower = flint::arf_get_d(bound, ARF_RND_FLOOR);
+    if (!std::isfinite(target_upper) || !(target_upper > 0.0) ||
+        !std::isfinite(sigma_scale_lower) || !(sigma_scale_lower > 0.0)) {
+        return;
+    }
+    out.sigma_scale_lower = sigma_scale_lower;
+    out.beta_coefficient = 4.26 * static_cast<double>(context.degree - 1);
+    out.threshold = target_upper * (1.0 + std::ldexp(1.0, -30));
+    out.enabled = std::isfinite(out.threshold);
+}
+
+enum class BfTheorem7ScreenResult { evaluate, skip, fail };
+
+// Screens the Theorem 7 bound at `cutoff` (see BfTheorem7Screen): `skip`
+// when the bound is certainly above the target, `fail` where
+// bf_theorem7_error_bound fails on delta, and `evaluate` otherwise.
+BfTheorem7ScreenResult bf_theorem7_screen(const BfTheorem7Screen& screen,
+                                          const BfTheorem7Context& context,
+                                          ulong cutoff,
+                                          const flint::Arb& prime_sum,
+                                          slong precision) noexcept {
+    if (!screen.enabled || cutoff % 9 != 0 || cutoff / 9 < 2 ||
+        cutoff >= kBfScreenMaxCutoff) {
+        return BfTheorem7ScreenResult::evaluate;
+    }
+    flint::Arb delta;
+    flint::arb_mul_2exp_si(delta, prime_sum, 1);
+    flint::arb_sub(delta, context.delta_constant, delta, precision);
+    if (!flint::arb_is_finite(delta) || !flint::arb_is_positive(delta)) {
+        return BfTheorem7ScreenResult::fail;
+    }
+    flint::Arf bound;
+    flint::arb_get_lbound_arf(bound, delta, precision);
+    const double delta_lower = flint::arf_get_d(bound, ARF_RND_FLOOR);
+    flint::arb_get_ubound_arf(bound, delta, precision);
+    const double delta_upper = flint::arf_get_d(bound, ARF_RND_CEIL);
+    if (!(delta_lower > 0.0) ||
+        !(delta_upper <= delta_lower * (1.0 + std::ldexp(1.0, -20)))) {
+        return BfTheorem7ScreenResult::evaluate;
+    }
+
+    const double x = static_cast<double>(cutoff);
+    const double log_ratio = std::log(static_cast<double>(cutoff / 9));
+    const double sqrt_cutoff = std::sqrt(x);
+    const double log_3cutoff = std::log(3.0 * x);
+    const double inner =
+            screen.sigma_scale_lower * delta_lower *
+                    (1.0 + 3.88 / log_ratio) +
+            screen.beta_coefficient * (0.5 + 1.0 / log_ratio) / sqrt_cutoff;
+    const double lower = 2.324 * inner / (sqrt_cutoff * log_3cutoff);
+    return lower > screen.threshold ? BfTheorem7ScreenResult::skip
+                                    : BfTheorem7ScreenResult::evaluate;
+}
+
 // Adds the prime ideals above `p` with norm below `cutoff` to `prime_sum`,
 // and queues those with norm p^f >= p^2 below `max_cutoff` in `pending`.
 // The residue degrees come from the same sources as bf_add_prime_terms,
@@ -4423,7 +4545,10 @@ bool bf_theorem7_add_prime(flint::Arb& prime_sum,
 // test entry).  `prime_sum_out`, when given, receives on success the prime
 // ideal sum at the selected cutoff.  The scan is deterministic: the same
 // order, `max_cutoff` and `precision` give the same bound at every cutoff,
-// whatever the target.
+// whatever the target.  Steps the double-precision screen proves above the
+// target (BfTheorem7Screen) are not evaluated in Arb; `screen_steps` false
+// evaluates every step (the test entry compares the two), and
+// `screened_steps`, when given, receives the number of skipped steps.
 bool bf_select_theorem7_cutoff(ulong& cutoff_out,
                                flint::Arb& bound_out,
                                const Order& order,
@@ -4435,7 +4560,9 @@ bool bf_select_theorem7_cutoff(ulong& cutoff_out,
                                const FactorBase* residue_degree_base,
                                detail::ZetaBfResidueDegreeCache*
                                        residue_degree_cache,
-                               flint::Arb* prime_sum_out = nullptr) noexcept {
+                               flint::Arb* prime_sum_out = nullptr,
+                               bool screen_steps = true,
+                               ulong* screened_steps = nullptr) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::unit_group,
                         "unit_group.zeta_bf.index_one.select_cutoff");
     ulong cutoff = bf_adjust_cutoff(kBfMinCutoff);
@@ -4454,6 +4581,13 @@ bool bf_select_theorem7_cutoff(ulong& cutoff_out,
     BfTheorem7Context context;
     if (!bf_theorem7_init(context, order, precision)) {
         return false;
+    }
+    BfTheorem7Screen screen;
+    if (screen_steps && prime_sum_limit == 0) {
+        bf_theorem7_screen_init(screen, context, tail_target, precision);
+    }
+    if (screened_steps != nullptr) {
+        *screened_steps = 0;
     }
     BfResidueDegreeContext residue_context;
     bf_init_residue_degree_context(residue_context, order,
@@ -4494,6 +4628,21 @@ bool bf_select_theorem7_cutoff(ulong& cutoff_out,
             }
         }
 
+        const BfTheorem7ScreenResult screened = bf_theorem7_screen(
+                screen, context, cutoff, prime_sum, precision);
+        if (screened == BfTheorem7ScreenResult::fail) {
+            return false;
+        }
+        if (screened == BfTheorem7ScreenResult::skip) {
+            if (screened_steps != nullptr) {
+                ++*screened_steps;
+            }
+            if (cutoff >= max_cutoff) {
+                return false;
+            }
+            cutoff += 9;
+            continue;
+        }
         if (!bf_theorem7_error_bound(bound, context, cutoff, prime_sum,
                                      precision)) {
             return false;
@@ -4647,7 +4796,10 @@ bool bf_theorem7_add_prime_ideal_tail_bound(flint::Arb& sum,
 // bound below on [X_c, X_m].  Below X_c the scan of a call with this
 // denominator computes the same balls as the call that selected X_c, none
 // of which was below that call's target; that target's ball lies above
-// this one's (checked), so none is below this one either.
+// this one's (checked), so none is below this one either.  (Balls here are
+// those of the scan evaluating every step; its step screen only skips
+// steps whose exact bound is above the target, which selects the same
+// cutoff.)
 bool bf_index_one_target_unreachable(
         const Order& order,
         const detail::ZetaBfRouteAudit& index_one_audit,
@@ -5315,6 +5467,33 @@ bool ZetaTestEntry::bf_theorem7_error_bound(flint::ArbRef out,
         return false;
     }
     flint::arb_set(out, flint::ArbConstRef(bound));
+    return true;
+}
+
+bool ZetaTestEntry::bf_theorem7_cutoff_scan(ulong& cutoff,
+                                            flint::ArbRef bound,
+                                            flint::ArbRef prime_sum,
+                                            ulong& screened_steps,
+                                            const Order& order,
+                                            const flint::Arb& tail_target,
+                                            ulong max_cutoff,
+                                            bool screen) noexcept {
+    if (!supported_order(order, kBfIndexOneBoundPrecision) ||
+        order.degree() <= 1) {
+        return false;
+    }
+    ulong selected = 0;
+    flint::Arb selected_bound;
+    flint::Arb selected_sum;
+    if (!bf_select_theorem7_cutoff(
+                selected, selected_bound, order, tail_target, max_cutoff, 0,
+                kBfIndexOneBoundPrecision, nullptr, nullptr, nullptr,
+                &selected_sum, screen, &screened_steps)) {
+        return false;
+    }
+    cutoff = selected;
+    flint::arb_set(bound, flint::ArbConstRef(selected_bound));
+    flint::arb_set(prime_sum, flint::ArbConstRef(selected_sum));
     return true;
 }
 

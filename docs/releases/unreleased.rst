@@ -244,6 +244,22 @@ Changed
   that reach the refined step.  No row is slower by more than 0.02% in
   these runs.
 
+- The ``grh`` Belabas-Friedman Theorem 7 cutoff scan now screens each
+  ``cutoff += 9`` step with a double-precision lower bound on the Theorem 7
+  bound and skips the Arb evaluation when that lower bound, with a relative
+  safety margin of ``2^-30``, is above the target.  A cutoff is still
+  accepted only on the Arb bound, so the selected cutoffs, bounds and prime
+  sums are those of the unscreened scan; a failure of the bound on ``delta``
+  is detected at the same step as before.  ``grh`` outputs, with timing
+  keys removed, are identical on 171 corpus rows and the 15 fixture-only
+  test fields (``cyclotomic_real_163_deg81`` times out on both), and a
+  build that also evaluates every skipped step in Arb found none below the
+  target.  Whole-process callgrind Ir of ``grh`` (single runs) drops by
+  4.26% on ``nonadecic_x19_minus_x_minus_1_proven``, 3.66% on
+  ``cyclotomic_real_q10_c11_deg10`` and 0.81% on
+  ``hexadecic_x16_minus_x_minus_1_proven``; no row measured is slower.
+  No wall-clock claim is made.
+
 - The residue degrees that the defining-polynomial route reads from the
   distinct-degree factorization modulo ``p``
   (``nmod_poly_factor_distinct_deg``) are now kept with the maximal order,
