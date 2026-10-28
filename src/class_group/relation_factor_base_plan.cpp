@@ -11,6 +11,7 @@
 #include <flint/ulong_extras.h>
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -1007,6 +1008,25 @@ bool quadratic_base_exceeds_relation_module_limit(
     return true;
 }
 
+// Debug check of the postcondition of
+// specialize_maximal_imaginary_quadratic_factor_base_plan: the working bound
+// reaches the generation bound, or the plan keeps its compact base and sets
+// the structure-certificate switch.  The maximal imaginary quadratic relation
+// backend makes the same comparison and fails closed when neither holds, so
+// this keeps that failed branch unreachable from a specialized plan.
+[[maybe_unused]] bool quadratic_plan_has_generation_route(
+        const RelationFactorBasePlan& plan,
+        const Order& order) noexcept {
+    if (plan.imaginary_quadratic_structure_certificate) {
+        return true;
+    }
+    flint::Fmpz generation_bound;
+    return factor_base_class_group_bound(
+                   flint::FmpzRef(generation_bound), order) &&
+           flint::fmpz_cmp(flint::FmpzConstRef(plan.working_bound),
+                           flint::FmpzConstRef(generation_bound)) >= 0;
+}
+
 }  // namespace
 
 bool specialize_maximal_imaginary_quadratic_factor_base_plan(
@@ -1113,6 +1133,7 @@ bool specialize_maximal_imaginary_quadratic_factor_base_plan(
             }
         }
     }
+    assert(quadratic_plan_has_generation_route(plan, order));
     return true;
 }
 

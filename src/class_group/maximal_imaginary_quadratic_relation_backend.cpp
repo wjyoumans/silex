@@ -1369,7 +1369,8 @@ ClassGroupContext::run_maximal_imaginary_quadratic_relation_backend_(
     // the specialized plan of that transaction
     // (specialize_maximal_imaginary_quadratic_factor_base_plan) either lifts
     // its working bound to the generation bound or keeps the compact base
-    // and sets the structure-certificate switch.
+    // and sets the structure-certificate switch.  An assertion at the end of
+    // that function checks this postcondition in builds with assertions.
     if (compact_base_needs_honesty && !structure_certificate_route) {
         return SpecializedRelationBackendStatus::failed;
     }
