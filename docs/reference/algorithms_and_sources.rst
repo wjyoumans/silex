@@ -1316,10 +1316,14 @@ witness), the precision at which the last two-LLL reduction succeeded, and
 starts the next ideal of that order there when it is higher than the
 requested precision.  An order whose ideals all fail at the requested
 precision then pays for the failed attempts once rather than once per ideal.
-A warm-started reduction is the reduction Hecke's loop would return when
-called at that precision, with the same checks; an ideal that would have
-passed at a lower precision gets the reduced basis at the higher one, a
-different but equally valid basis.
+A warm-started reduction is the reduction Silex's own schedule (with its
+embedding-precision raise) returns when started at that precision, with the
+same checks; an ideal that would have passed at a lower precision gets the
+reduced basis at the higher one, a different but equally valid basis.  The
+one-LLL/two-LLL route check builds its two-LLL basis through the same cache,
+so after an earlier ideal fell back to a higher precision it compares
+against that basis, which can change the route chosen for later ideals of
+the order.
 
 The small-LLL phase of the LLL relation search reduces each ideal with one
 integer LLL, as PARI 2.17.3 ``buch2.c:Fincke_Pohst_ideal`` (2461-2462) does

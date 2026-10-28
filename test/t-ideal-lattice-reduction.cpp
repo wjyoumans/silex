@@ -1120,17 +1120,6 @@ void run_grh_route_check(bool& route_checked,
     use_two_lll_route = cache->use_two_lll_route;
 }
 
-// The route check runs once per order in a class-group context: the result
-// for the first accepted ideal of the order is kept in the context and used
-// by every later relation-route slice.  On the real subfield of Q(zeta_31)
-// (benchmark row cyclotomic_real_31_deg15) the first ideal, the unit ideal
-// of the first slice, passes the check (one-LLL T2 diagonal product about
-// 2^13.3 times the two-LLL one, under 2^15), so no ideal of the computation
-// takes the two-LLL route.  When each slice ran its own check, the first
-// pivot ideals of four of the seven extension slices failed it (2^15.2 to
-// 2^20.9), so those slices switched route and the relation set changed.  On the octic field of row
-// multiquadratic_p5_m7_m11 the unit ideal fails the check (about 2^23.4
-// against 2^8), and the order keeps the two-LLL route.
 // The checks every two-LLL result passes: a basis of the ideal's lattice
 // with a positive definite symmetric scaled Gram (as
 // rounded_embedding_data_has_contract), the Gram denominator 2^(p/2) of the
@@ -1248,6 +1237,17 @@ int test_two_lll_warm_start_matches_cold_build_at_warm_precision() {
     return 0;
 }
 
+// The route check runs once per order in a class-group context: the result
+// for the first accepted ideal of the order is kept in the context and used
+// by every later relation-route slice.  On the real subfield of Q(zeta_31)
+// (benchmark row cyclotomic_real_31_deg15) the first ideal, the unit ideal
+// of the first slice, passes the check (one-LLL T2 diagonal product about
+// 2^13.3 times the two-LLL one, under 2^15), so no ideal of the computation
+// takes the two-LLL route.  When each slice ran its own check, the first
+// pivot ideals of four of the seven extension slices failed it (2^15.2 to
+// 2^20.9), so those slices switched route and the relation set changed.  On the octic field of row
+// multiquadratic_p5_m7_m11 the unit ideal fails the check (about 2^23.4
+// against 2^8), and the order keeps the two-LLL route.
 int test_rounded_embedding_route_check_once_per_context() {
     constexpr std::array<slong, 16> real_31 = {
             -1, -8, 28, 84, -126, -252, 210, 330,

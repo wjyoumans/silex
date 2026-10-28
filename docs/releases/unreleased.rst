@@ -2748,8 +2748,10 @@ Changed
   passed at a lower one, the later ideal now gets the reduced basis of the
   higher precision, a different but equally valid LLL basis, so relations,
   ``relation_sources`` and the chosen fundamental units or witness
-  multipliers can differ (class groups, regulators and labels are
-  unaffected).  On the 184 ``grh`` corpus rows (``cyclotomic_real_163_deg81``
+  multipliers can differ, as can the one-LLL/two-LLL route chosen for later
+  ideals of the order (class groups, regulators and labels are unaffected
+  for computations that complete; failure outcomes under
+  ``max_candidates`` or ``max_relations`` caps can also differ).  On the 184 ``grh`` corpus rows (``cyclotomic_real_163_deg81``
   not run) no order has such an ideal, and the instance JSON, with timing
   keys removed, is identical.  Whole-process callgrind Ir of ``grh`` drops by
   10.30% on ``cyclotomic_real_q10_c11_deg10``; it is unchanged (within
