@@ -317,6 +317,12 @@ bool zeta_class_regulator_product_validation_with_diagnostics(
 // residue has radius below 1/4.
 inline constexpr ulong kZetaBfIndexOneLogRadiusDenominator = 4;
 
+// The exclusive limit on the log-radius denominator q of a grh index-one
+// value: its Theorem 7 tail target is 1/q - 2^-20, which is not positive
+// for q >= 2^20, so no cutoff can reach it.
+inline constexpr ulong kZetaBfIndexOneLogRadiusDenominatorLimit = UWORD(1)
+                                                                  << 20;
+
 // The Belabas-Friedman hR for the grh analytic index-one test: the log
 // residue f_K(X) at the least cutoff X (a multiple of 9 up to the default
 // route's maximum) whose Belabas-Friedman 2015 Theorem 7 bound, with

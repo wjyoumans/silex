@@ -374,7 +374,8 @@ namespace {
 // (k, k + 1) (or both shortcut to index one).  q only schedules the work:
 // with true index k <= B and relative width about 2/q the enclosure is at
 // most about one unit wide.  Returns false, leaving the default hR to
-// decide, when the prerequisites fail, B is too large for q, the value is
+// decide, when the prerequisites fail, B is at least 2^19 (q >= 2^20
+// leaves the tail target 1/q - 2^-20 nonpositive), the value is
 // unavailable (no cutoff up to the default maximum reaches 1/q), or the
 // enclosure holds two or more integers or none.
 bool refined_index_bound_for_validation(
@@ -389,7 +390,9 @@ bool refined_index_bound_for_validation(
     if (!validation_integer_index_prerequisites(class_group, true) ||
         flint::fmpz_sgn(flint::FmpzConstRef(coarse_index_bound)) <= 0 ||
         flint::fmpz_cmp_ui(flint::FmpzConstRef(coarse_index_bound),
-                           UWORD_MAX / 2) > 0) {
+                           kZetaBfIndexOneLogRadiusDenominatorLimit / 2) >=
+                0) {
+        // q = 2 B >= 2^20 leaves no positive tail target.
         return false;
     }
     const ulong denominator = FLINT_MAX(
@@ -1673,10 +1676,12 @@ bool try_validate_refine_loop(ClassGroupContext& class_group,
                     // When that hR was a Belabas-Friedman value, also record
                     // its audit data.  A grh request never enables the
                     // validation enclosure (validation_bf_max_cutoff_for_
-                    // options), so the value is either the coarse Theorem 7
-                    // index-one value that was accepted as index one, or the
-                    // default zeta route's value; a seeded value has no
-                    // audit data and records none.
+                    // options), so the value is the coarse Theorem 7
+                    // index-one value that was accepted as index one, the
+                    // refined value (log radius below 1/q) whose enclosure
+                    // held the single integer one, or the default zeta
+                    // route's value; a seeded value has no audit data and
+                    // records none.
                     // The record cannot fail here: the presentation exists,
                     // both precisions are positive, and the error bound is
                     // finite because the Belabas-Friedman value it was added

@@ -16495,7 +16495,8 @@ silex::OrderUnitGroup power_unit_sublattice(const silex::OrderUnitGroup& units,
 // bound) is tried.  For e = 2 its index enclosure holds the single integer
 // 4 and gives the bound; the default hR is not computed, and the bound is
 // the one the default hR gives.  For e = 40 no cutoff up to the default
-// maximum reaches that radius, so the default hR gives the bound.
+// maximum reaches that radius, so the default hR gives the bound.  For
+// e = 725 the refined value is not tried (q >= 2^20).
 int test_grh_index_bound_refined_value_before_default() {
     static constexpr slong coefficients[] = {1, -2, -1, 1};
     sflint::FmpzPoly polynomial;
@@ -16613,6 +16614,28 @@ int test_grh_index_bound_refined_value_before_default() {
     default_bound(index_1600, expected);
     assert(sflint::fmpz_cmp_ui(sflint::FmpzConstRef(expected), 1600) > 0);
     assert(sflint::fmpz_equal(sflint::FmpzConstRef(fallback_bound),
+                              sflint::FmpzConstRef(expected)));
+
+    // For e = 725 the coarse bound is at least 725^2 > 2^19, so q >= 2^20
+    // leaves no positive tail target and the refined value is not tried.
+    refined_runs.count = 0;
+    default_runs.count = 0;
+    silex::OrderUnitGroup index_525625 =
+            power_unit_sublattice(units, order, field, 725);
+    index_525625.set_diagnostics(&diagnostics);
+    silex::detail::AnalyticClassRegulatorCache large_cache;
+    sflint::Fmpz large_bound;
+    assert(silex::detail::analytic_index_bound_for_validation(
+            large_bound, index_525625, class_group, large_cache, order, 128,
+            true));
+    index_525625.set_diagnostics(nullptr);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    assert(refined_runs.count == 0);
+    assert(default_runs.count == 1);
+#endif
+    default_bound(index_525625, expected);
+    assert(sflint::fmpz_cmp_ui(sflint::FmpzConstRef(expected), 525625) > 0);
+    assert(sflint::fmpz_equal(sflint::FmpzConstRef(large_bound),
                               sflint::FmpzConstRef(expected)));
     return 0;
 }

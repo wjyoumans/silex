@@ -45,6 +45,8 @@ constexpr slong kBfMaxWorkPrecision = WORD(2048);
 constexpr slong kBfArrayLinearFactorMaxDegree = WORD(6);
 constexpr slong kValidationInitialWorkPrecision = WORD(64);
 constexpr slong kValidationReserveBits = WORD(20);
+static_assert(detail::kZetaBfIndexOneLogRadiusDenominatorLimit ==
+              UWORD(1) << kValidationReserveBits);
 
 using detail::BfResidueDegreeContext;
 
