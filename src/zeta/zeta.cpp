@@ -4134,6 +4134,23 @@ constexpr ulong kBfIndexOneTargetDenominator =
         detail::kZetaBfIndexOneLogRadiusDenominator;
 constexpr slong kBfIndexOneBoundPrecision = WORD(64);
 
+// The index-one targets for log-radius denominator q: the total radius
+// 1/q, the 2^-20 reserved for the numerical radius of the BF term, and the
+// Theorem 7 tail target 1/q - 2^-20.
+void bf_index_one_targets(flint::Arb& target,
+                          flint::Arb& numerical_radius_target,
+                          flint::Arb& tail_target,
+                          ulong log_radius_denominator) noexcept {
+    flint::arb_one(target);
+    flint::arb_div_ui(target, target, log_radius_denominator,
+                      kBfIndexOneBoundPrecision);
+    flint::arb_one(numerical_radius_target);
+    flint::arb_mul_2exp_si(numerical_radius_target, numerical_radius_target,
+                           -kValidationReserveBits);
+    flint::arb_sub(tail_target, target, numerical_radius_target,
+                   kBfIndexOneBoundPrecision);
+}
+
 struct BfTheorem7Context {
     flint::Arb sigma_scale;     // 2 sigma - 1
     flint::Arb delta_constant;  // delta(K, sigma, X) without the prime sum
@@ -4383,7 +4400,10 @@ bool bf_theorem7_add_prime(flint::Arb& prime_sum,
 // `max_cutoff`) whose Theorem 7 bound is below `tail_target`, scanning the
 // prime ideals in order of norm.  `prime_sum_limit`, when nonzero, stops the
 // scan at that cutoff instead and reports its bound whatever its size (the
-// test entry).
+// test entry).  `prime_sum_out`, when given, receives on success the prime
+// ideal sum at the selected cutoff.  The scan is deterministic: the same
+// order, `max_cutoff` and `precision` give the same bound at every cutoff,
+// whatever the target.
 bool bf_select_theorem7_cutoff(ulong& cutoff_out,
                                flint::Arb& bound_out,
                                const Order& order,
@@ -4394,7 +4414,8 @@ bool bf_select_theorem7_cutoff(ulong& cutoff_out,
                                const DiagnosticsContext* diagnostics,
                                const FactorBase* residue_degree_base,
                                detail::ZetaBfResidueDegreeCache*
-                                       residue_degree_cache) noexcept {
+                                       residue_degree_cache,
+                               flint::Arb* prime_sum_out = nullptr) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::unit_group,
                         "unit_group.zeta_bf.index_one.select_cutoff");
     ulong cutoff = bf_adjust_cutoff(kBfMinCutoff);
@@ -4460,6 +4481,9 @@ bool bf_select_theorem7_cutoff(ulong& cutoff_out,
         if (prime_sum_limit != 0 || flint::arb_lt(bound, tail_target)) {
             cutoff_out = cutoff;
             flint::arb_set(bound_out, bound);
+            if (prime_sum_out != nullptr) {
+                flint::arb_set(*prime_sum_out, prime_sum);
+            }
             return true;
         }
         if (cutoff >= max_cutoff) {
@@ -4493,22 +4517,17 @@ bool bf_log_residue_index_one(flint::ArbRef out,
     flint::Arb target;
     flint::Arb numerical_radius_target;
     flint::Arb tail_target;
-    flint::arb_one(target);
-    flint::arb_div_ui(target, target, log_radius_denominator,
-                      kBfIndexOneBoundPrecision);
-    flint::arb_one(numerical_radius_target);
-    flint::arb_mul_2exp_si(numerical_radius_target, numerical_radius_target,
-                           -kValidationReserveBits);
-    flint::arb_sub(tail_target, target, numerical_radius_target,
-                   kBfIndexOneBoundPrecision);
+    bf_index_one_targets(target, numerical_radius_target, tail_target,
+                         log_radius_denominator);
 
     ulong cutoff = 0;
     flint::Arb error_bound;
+    flint::Arb prime_sum;
     if (!bf_select_theorem7_cutoff(cutoff, error_bound, order, tail_target,
                                    kBfDefaultMaxCutoff, 0,
                                    kBfIndexOneBoundPrecision, diagnostics,
                                    residue_degree_base,
-                                   residue_degree_cache)) {
+                                   residue_degree_cache, &prime_sum)) {
         return false;
     }
 
@@ -4539,6 +4558,176 @@ bool bf_log_residue_index_one(flint::ArbRef out,
     audit.max_cutoff = kBfDefaultMaxCutoff;
     audit.requested_precision = precision;
     audit.work_precision = work_precision;
+    flint::arb_set(audit.theorem7_prime_sum, prime_sum);
+    audit.theorem7_log_radius_denominator = log_radius_denominator;
+    return true;
+}
+
+// Adds to `sum` an upper bound for the sum of log N / (N^sigma - 1) over
+// the prime ideals of norm N in [lower, upper), lower >= 3.  Above a prime
+// p there are at most n prime ideals of norm p and at most floor(n/f) of
+// norm p^f, as their degrees e f sum to n; prime powers p^f with f >= 2
+// are added one by one with that count.  The primes themselves are counted
+// in blocks [a, b) with b about a (1 + 1/64), each prime bounded by the
+// value at a: g(m) = log m / (m^sigma - 1) decreases for m >= 3 and
+// sigma > 1, since m g'(m) (m^sigma - 1)^2 = m^sigma (1 - sigma log m) - 1
+// is negative there.  Stops, returning false, once `sum` certainly exceeds
+// `limit`.
+bool bf_theorem7_add_prime_ideal_tail_bound(flint::Arb& sum,
+                                            const BfTheorem7Context& context,
+                                            ulong lower,
+                                            ulong upper,
+                                            const flint::Arb& limit,
+                                            slong precision) noexcept {
+    if (lower < 3 || upper <= lower) {
+        return lower >= 3;
+    }
+    const ulong degree = static_cast<ulong>(context.degree);
+    // Prime powers p^f, f >= 2: only p below sqrt(upper).
+    for (ulong p = 2; p <= (upper - 1) / p; p = n_nextprime(p, 1)) {
+        ulong norm = p;
+        for (ulong f = 2; f <= degree && norm <= (upper - 1) / p; ++f) {
+            norm *= p;
+            if (norm >= lower) {
+                bf_theorem7_add_prime_ideals(sum, context, norm, degree / f,
+                                             precision);
+            }
+        }
+    }
+    // Primes, by blocks.
+    ulong p = n_nextprime(lower - 1, 1);
+    for (ulong block = lower; block < upper && p < upper;) {
+        const ulong block_end =
+                block + FLINT_MIN(block / 64 + 1, upper - block);
+        ulong count = 0;
+        for (; p < block_end; p = n_nextprime(p, 1)) {
+            ++count;
+        }
+        if (count > 0) {
+            bf_theorem7_add_prime_ideals(sum, context, block, count * degree,
+                                         precision);
+            if (flint::arb_gt(sum, limit)) {
+                return false;
+            }
+        }
+        block = block_end;
+    }
+    return true;
+}
+
+// See detail::zeta_bf_index_one_target_unreachable.  The Theorem 7 bound
+// B(X) is the product of 2.324 (2 sigma - 1) / (sqrt(X) log(3X)) and
+// delta(X) (1 + 3.88 / log(X/9)) + 4.26 (n - 1) beta(log(X/9)) /
+// ((2 sigma - 1) sqrt(X)) (Belabas-Friedman 2015, Theorem 7, p. 12; see
+// the comment above kBfIndexOneTargetDenominator).  For X <= X_m the first
+// factor and 1 + 3.88 / log(X/9) are at least their values at X_m, the beta
+// term is positive, and delta(X) = delta_0 - 2 S(X) is at least
+// delta_0 - 2 S(X_m) >= delta_0 - 2 (S(X_c) + T) because S does not
+// decrease.  So when that lower bound is positive, B(X) is at least the
+// bound below on [X_c, X_m].  Below X_c the scan of a call with this
+// denominator computes the same balls as the call that selected X_c, none
+// of which was below that call's target; that target's ball lies above
+// this one's (checked), so none is below this one either.
+bool bf_index_one_target_unreachable(
+        const Order& order,
+        const detail::ZetaBfRouteAudit& index_one_audit,
+        ulong log_radius_denominator,
+        const DiagnosticsContext* diagnostics) noexcept {
+    SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::unit_group,
+                        "unit_group.zeta_bf.index_one.target_unreachable");
+    const ulong max_cutoff = bf_adjust_cutoff(kBfDefaultMaxCutoff);
+    const ulong coarse_denominator =
+            index_one_audit.theorem7_log_radius_denominator;
+    const ulong coarse_cutoff = index_one_audit.cutoff;
+    if (order.degree() <= 1 ||
+        coarse_denominator < kBfIndexOneTargetDenominator ||
+        log_radius_denominator <= coarse_denominator ||
+        log_radius_denominator >=
+                detail::kZetaBfIndexOneLogRadiusDenominatorLimit ||
+        index_one_audit.max_cutoff != kBfDefaultMaxCutoff ||
+        coarse_cutoff < bf_adjust_cutoff(kBfMinCutoff) ||
+        coarse_cutoff % 9 != 0 || coarse_cutoff > max_cutoff ||
+        !flint::arb_is_finite(index_one_audit.theorem7_prime_sum) ||
+        !flint::arb_is_nonnegative(index_one_audit.theorem7_prime_sum.raw())) {
+        return false;
+    }
+
+    const slong precision = kBfIndexOneBoundPrecision;
+    flint::Arb target;
+    flint::Arb numerical_radius_target;
+    flint::Arb coarse_tail_target;
+    flint::Arb tail_target;
+    bf_index_one_targets(target, numerical_radius_target, coarse_tail_target,
+                         coarse_denominator);
+    bf_index_one_targets(target, numerical_radius_target, tail_target,
+                         log_radius_denominator);
+    if (!flint::arb_is_positive(tail_target) ||
+        !flint::arb_lt(tail_target, coarse_tail_target)) {
+        return false;
+    }
+
+    BfTheorem7Context context;
+    if (!bf_theorem7_init(context, order, precision)) {
+        return false;
+    }
+
+    // factor = 2.324 (2 sigma - 1) (1 + 3.88 / log(X_m/9))
+    //          / (sqrt(X_m) log(3 X_m))
+    flint::Arb factor;
+    flint::Arb temp;
+    flint::Arb constant;
+    flint::arb_log_ui(temp, max_cutoff / 9, precision);
+    bf_const_decimal(constant, 388, 100, precision);
+    flint::arb_div(factor, constant, temp, precision);
+    flint::arb_add_ui(factor, factor, 1, precision);
+    bf_const_decimal(constant, 2324, 1000, precision);
+    flint::arb_mul(factor, factor, constant, precision);
+    flint::arb_mul(factor, factor, context.sigma_scale, precision);
+    bf_log_3cutoff(temp, max_cutoff, precision);
+    flint::arb_sqrt_ui(constant, max_cutoff, precision);
+    flint::arb_mul(temp, temp, constant, precision);
+    flint::arb_div(factor, factor, temp, precision);
+    if (!flint::arb_is_finite(factor) || !flint::arb_is_positive(factor)) {
+        return false;
+    }
+
+    // The bound reaches the target only if T is at most
+    // (delta_0 - 2 S(X_c) - target / factor) / 2; past that, stop.
+    flint::Arb limit;
+    flint::arb_div(limit, tail_target, factor, precision);
+    flint::arb_mul_2exp_si(temp, index_one_audit.theorem7_prime_sum, 1);
+    flint::arb_add(limit, limit, temp, precision);
+    flint::arb_sub(limit, context.delta_constant, limit, precision);
+    flint::arb_mul_2exp_si(limit, limit, -1);
+    if (!flint::arb_is_finite(limit) || !flint::arb_is_positive(limit)) {
+        return false;
+    }
+
+    flint::Arb tail_sum;
+    flint::arb_zero(tail_sum);
+    if (!bf_theorem7_add_prime_ideal_tail_bound(tail_sum, context,
+                                                coarse_cutoff, max_cutoff,
+                                                limit, precision)) {
+        return false;
+    }
+
+    // factor (delta_0 - 2 (S(X_c) + T)) >= target, on the whole balls.
+    flint::Arb delta;
+    flint::arb_add(delta, index_one_audit.theorem7_prime_sum, tail_sum,
+                   precision);
+    flint::arb_mul_2exp_si(delta, delta, 1);
+    flint::arb_sub(delta, context.delta_constant, delta, precision);
+    if (!flint::arb_is_finite(delta) || !flint::arb_is_positive(delta)) {
+        return false;
+    }
+    flint::arb_mul(delta, delta, factor, precision);
+    if (!flint::arb_is_finite(delta) ||
+        ::arb_ge(delta.raw(), tail_target.raw()) == 0) {
+        return false;
+    }
+    SILEX_PROFILE_EVENT(diagnostics, DiagnosticsModule::unit_group,
+                        "unit_group.zeta_bf.index_one.target_unreachable."
+                        "proven");
     return true;
 }
 
@@ -5107,6 +5296,17 @@ bool ZetaTestEntry::bf_theorem7_error_bound(flint::ArbRef out,
     }
     flint::arb_set(out, flint::ArbConstRef(bound));
     return true;
+}
+
+bool zeta_bf_index_one_target_unreachable(
+        const Order& order,
+        const ZetaBfRouteAudit& index_one_audit,
+        ulong log_radius_denominator,
+        const DiagnosticsContext* diagnostics) noexcept {
+    return supported_order(order, kBfIndexOneBoundPrecision) &&
+           bf_index_one_target_unreachable(order, index_one_audit,
+                                           log_radius_denominator,
+                                           diagnostics);
 }
 
 bool zeta_bf_audit_cutoff_available(const Order& order,

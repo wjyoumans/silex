@@ -1047,6 +1047,98 @@ bool check_grh_transaction_records_default_audit(
                        default_audit.error_bound.raw()) != 0;
 }
 
+// The skip of the refined index-one value is never taken where that value
+// exists.  On each (field, q) pair the coarse audit (q = 4) records its
+// denominator and the Theorem 7 prime-ideal sum at its cutoff, the skip
+// test zeta_bf_index_one_target_unreachable gives `expect_unreachable`,
+// and the refined value of the index-one route, computed in full, exists
+// exactly when the test does not prove it unreachable (the pairs are
+// chosen so that it does exist then).  The test also declines a q not
+// above the coarse denominator, and an audit without Theorem 7 data.
+bool check_index_one_target_unreachable(const FieldSetup& setup,
+                                        ulong log_radius_denominator,
+                                        bool expect_unreachable) noexcept {
+    sflint::Arb product;
+    silex::detail::ZetaBfRouteAudit coarse_audit;
+    if (!silex::detail::zeta_class_regulator_product_index_one_with_diagnostics(
+                sflint::ArbRef(product), coarse_audit, setup.maximal_order,
+                128, nullptr) ||
+        coarse_audit.theorem7_log_radius_denominator != 4 ||
+        !sflint::arb_is_finite(coarse_audit.theorem7_prime_sum) ||
+        !sflint::arb_is_positive(coarse_audit.theorem7_prime_sum)) {
+        return false;
+    }
+    const bool unreachable =
+            silex::detail::zeta_bf_index_one_target_unreachable(
+                    setup.maximal_order, coarse_audit,
+                    log_radius_denominator);
+    silex::detail::ZetaBfRouteAudit refined_audit;
+    const bool refined =
+            silex::detail::
+                    zeta_class_regulator_product_index_one_with_diagnostics(
+                            sflint::ArbRef(product), refined_audit,
+                            setup.maximal_order, 128, nullptr, nullptr,
+                            nullptr, log_radius_denominator);
+    if (unreachable != expect_unreachable || refined == unreachable ||
+        (refined && refined_audit.theorem7_log_radius_denominator !=
+                            log_radius_denominator)) {
+        return false;
+    }
+    if (silex::detail::zeta_bf_index_one_target_unreachable(
+                setup.maximal_order, coarse_audit, 4)) {
+        return false;
+    }
+    coarse_audit.theorem7_log_radius_denominator = 0;
+    return !silex::detail::zeta_bf_index_one_target_unreachable(
+            setup.maximal_order, coarse_audit, log_radius_denominator);
+}
+
+// Counts the events that report a proven-unreachable refined target.
+void count_target_unreachable_events(void* user,
+                                     silex::DiagnosticsModule,
+                                     silex::ProfileEvent event,
+                                     const char*,
+                                     const char* label) noexcept {
+    if (event == silex::ProfileEvent::event && label != nullptr &&
+        std::strcmp(label,
+                    "unit_group.zeta_bf.index_one.target_unreachable."
+                    "proven") == 0) {
+        ++*static_cast<slong*>(user);
+    }
+}
+
+// x^2 - x - 2500000001 (coarse cutoff 3168): no cutoff up to the default
+// maximum reaches log radius 1/16 (checked by the full scan in
+// check_index_one_target_unreachable), and the cache records that failure
+// without the scan; the slot then serves the next call.
+bool check_index_one_refined_cache_skip(const FieldSetup& setup) noexcept {
+    slong proven = 0;
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(
+                    silex::DiagnosticsModule::unit_group),
+            count_target_unreachable_events, &proven);
+    silex::detail::AnalyticClassRegulatorCache cache;
+    if (!cache.ensure_index_one(setup.maximal_order, 128, &diagnostics) ||
+        cache.ensure_index_one_refined(setup.maximal_order, 128, 16,
+                                       &diagnostics) ||
+        cache.ensure_index_one_refined(setup.maximal_order, 128, 16,
+                                       &diagnostics)) {
+        return false;
+    }
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    if (proven != 1) {
+        return false;
+    }
+#endif
+    // The coarse value is still cached and served.
+    return cache.ensure_index_one(setup.maximal_order, 128, &diagnostics) &&
+           cache.value_bf_audit() != nullptr &&
+           cache.value_bf_audit()->cutoff == 3168;
+}
+
 // The grh default-route product (Belabas-Friedman residue at the default
 // maximum cutoff), with its audit.
 bool call_grh_default_product(
@@ -1838,6 +1930,9 @@ int main() {
     const slong x2_minus_210[] = {-210, 0};
     const slong x3_plus_x_plus_200[] = {200, 1, 0};
     const slong x2_minus_x_minus_2500000001[] = {-2500000001, -1};
+    const slong x2_minus_x_minus_250000000002[] = {-250000000002, -1};
+    const slong x2_minus_x_plus_25000000000080[] = {25000000000080, -1};
+    const slong x4_minus_7[] = {-7, 0, 0, 0};
 
     return !check_failed_call_preserves_outputs(quadratic.maximal_order,
                                                 20000) ||
@@ -1861,6 +1956,27 @@ int main() {
                    !check_grh_transaction_records_coarse_audit_after_refined_bound(
                            setup_from_coefficients(x3_plus_x_plus_200, 3)) ||
                    !check_grh_transaction_records_default_audit(
+                           setup_from_coefficients(x2_minus_x_minus_2500000001,
+                                                   2)) ||
+                   !check_index_one_target_unreachable(
+                           setup_from_coefficients(x4_minus_7, 4), 12,
+                           false) ||
+                   !check_index_one_target_unreachable(
+                           setup_from_coefficients(x3_plus_x_plus_200, 3), 8,
+                           false) ||
+                   !check_index_one_target_unreachable(
+                           setup_from_coefficients(
+                                   x2_minus_x_plus_25000000000080, 2),
+                           8, false) ||
+                   !check_index_one_target_unreachable(
+                           setup_from_coefficients(x2_minus_x_minus_2500000001,
+                                                   2),
+                           16, true) ||
+                   !check_index_one_target_unreachable(
+                           setup_from_coefficients(
+                                   x2_minus_x_minus_250000000002, 2),
+                           26, true) ||
+                   !check_index_one_refined_cache_skip(
                            setup_from_coefficients(x2_minus_x_minus_2500000001,
                                                    2)) ||
                    !check_linear_factor_count_cache(

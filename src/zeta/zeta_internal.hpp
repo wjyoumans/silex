@@ -132,12 +132,19 @@ struct ZetaBfResidueDegreeCache {
 // index-one route (zeta_class_regulator_product_index_one_with_diagnostics)
 // fills the same fields, with the error bound of Belabas-Friedman 2015,
 // Theorem 7, below 1/4 (or below 1/q for a log-radius denominator q > 4).
+// That route also records its log-radius denominator q in
+// `theorem7_log_radius_denominator` and, in `theorem7_prime_sum`, the
+// Theorem 7 prime-ideal sum at `cutoff` (sum over prime ideals of norm
+// below `cutoff` of log N / (N^sigma - 1)); the denominator is zero on the
+// default route.
 struct ZetaBfRouteAudit {
     flint::Arb error_bound;
     ulong cutoff = 0;
     ulong max_cutoff = 0;
     slong requested_precision = 0;
     slong work_precision = 0;
+    flint::Arb theorem7_prime_sum;
+    ulong theorem7_log_radius_denominator = 0;
 };
 
 // `out` is the GRH generation bound min(BDF, Bach), or Bach's bound alone
@@ -349,6 +356,30 @@ bool zeta_class_regulator_product_index_one_with_diagnostics(
         ZetaBfResidueDegreeCache* residue_degree_cache = nullptr,
         ulong log_radius_denominator =
                 kZetaBfIndexOneLogRadiusDenominator) noexcept;
+
+// True only when it is proven that the grh index-one route with
+// log-radius denominator `log_radius_denominator`
+// (zeta_class_regulator_product_index_one_with_diagnostics) fails because
+// no cutoff up to the default maximum has a Theorem 7 bound below its
+// tail target 1/q - 2^-20.  `index_one_audit` is the audit of a successful
+// call of that route on the same order with a smaller denominator (the
+// coarse value, q = 4).  Below its cutoff X_c no bound was below the
+// larger target of that call, and the scan recomputes those bounds
+// identically; from X_c to the maximum X_m the bound is at least
+//   2.324 (2 sigma - 1) / (sqrt(X_m) log(3 X_m)) (1 + 3.88 / log(X_m/9))
+//       * (delta_0 - 2 (S(X_c) + T)),
+// where T bounds the sum over prime ideals of norm in [X_c, X_m) with at
+// most n ideals of norm p and floor(n/f) of norm p^f above each prime p,
+// the primes taken in short blocks at the value of the block start.  The
+// test
+// evaluates that bound in ball arithmetic and compares its lower endpoint
+// with the target's upper endpoint.  False means only "not proven": the
+// route may still fail.
+bool zeta_bf_index_one_target_unreachable(
+        const Order& order,
+        const ZetaBfRouteAudit& index_one_audit,
+        ulong log_radius_denominator,
+        const DiagnosticsContext* diagnostics = nullptr) noexcept;
 
 bool zeta_bf_audit_cutoff_available(const Order& order,
                                     ulong max_cutoff,

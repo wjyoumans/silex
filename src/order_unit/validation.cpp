@@ -376,8 +376,10 @@ namespace {
 // most about one unit wide.  Returns false, leaving the default hR to
 // decide, when the prerequisites fail, B is at least 2^19 (q >= 2^20
 // leaves the tail target 1/q - 2^-20 nonpositive), the value is
-// unavailable (no cutoff up to the default maximum reaches 1/q), or the
-// enclosure holds two or more integers or none.
+// unavailable (no cutoff up to the default maximum reaches 1/q; the cache
+// records that without the scan when the coarse value's audit proves it,
+// zeta_bf_index_one_target_unreachable), or the enclosure holds two or
+// more integers or none.
 bool refined_index_bound_for_validation(
         flint::Fmpz& index_bound,
         const OrderUnitGroup& units,

@@ -157,6 +157,30 @@ Changed
   ``real_quadratic_d1000000000009`` (+29.29%).  A later change is planned to
   recover them.
 
+- The refined ``grh`` index-one value is skipped when the coarse value's
+  audit proves that no cutoff up to the default maximum reaches its target:
+  a ball-arithmetic lower bound on the Belabas-Friedman Theorem 7 bound
+  from the coarse cutoff to the maximum, with the prime-ideal sum past the
+  coarse cutoff bounded above, is at least ``1/q - 2^-20``.  The default
+  ``hR`` then decides as before.  ``grh`` outputs, with timing keys
+  removed, are identical on 171 corpus rows (``cyclotomic_real_163_deg81``
+  times out on both).  Whole-process callgrind Ir of ``grh`` (busy machine)
+  drops by 18.08% on ``real_quadratic_d10000000005``, 22.74% on
+  ``real_quadratic_d1000000000009`` and 0.89% on ``cyclotomic_37_phi36``.
+  Rows that reach the refined value without a proven failure pay for the
+  test: ``cubic_disc1080004_proven`` (+0.32%), ``simplest_cubic_a0``
+  (+0.27%), ``real_quadratic_d100000001`` (+0.21%),
+  ``quintic_x5_minus_x_minus_1_proven`` (+0.21%),
+  ``quintic_disc401370255_proven`` (+0.20%), ``cyclotomic_7_phi6``
+  (+0.16%), ``pure_x5_minus_7`` (+0.16%), ``pure_x4_minus_7`` (+0.16%),
+  ``lmfdb_6_6_49744125_1`` (+0.15%), ``simplest_cubic_a12`` (+0.15%),
+  ``pure_x6_minus_3`` (+0.12%), ``pure_x8_minus_3`` (+0.11%),
+  ``cyclotomic_real_q10_c11_deg10`` (+0.08%), ``random_d10_h4_s27_proven``
+  (+0.07%), ``imaginary_quadratic_d100000000000319`` (+0.07%),
+  ``cyclotomic_48_phi16`` (+0.06%), ``lmfdb_8_8_73116160000_2`` (+0.04%),
+  ``multiquadratic_m3_m5_m7`` (+0.04%) and
+  ``nonadecic_x19_minus_x_minus_1_proven`` (+0.03%).
+
 - ``Ideal::multiply`` on a maximal order, when the two-generator search for
   the product fails, now takes a modular Hermite normal form of the ``n^2``
   basis products modulo the product of the two ideal minima

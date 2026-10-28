@@ -461,15 +461,26 @@ public:
         if (!slot_serves) {
             index_one_refined_precision_ = precision;
             index_one_refined_denominator_ = log_radius_denominator;
-            index_one_refined_valid_ =
-                    index_one_class_regulator_product_for_validation(
-                            flint::ArbRef(index_one_refined_value_),
-                            index_one_refined_audit_, order, precision,
-                            diagnostics, residue_degree_base,
-                            &bf_residue_degree_cache_,
-                            log_radius_denominator)
-                    ? 1
-                    : -1;
+            // A failure that the coarse value's audit already proves is
+            // recorded without the scan (zeta_bf_index_one_target_
+            // unreachable); the slot then holds the same failure the
+            // scan would give.
+            if (index_one_valid_ > 0 && index_one_precision_ == precision &&
+                zeta_bf_index_one_target_unreachable(
+                        order, index_one_audit_, log_radius_denominator,
+                        diagnostics)) {
+                index_one_refined_valid_ = -1;
+            } else {
+                index_one_refined_valid_ =
+                        index_one_class_regulator_product_for_validation(
+                                flint::ArbRef(index_one_refined_value_),
+                                index_one_refined_audit_, order, precision,
+                                diagnostics, residue_degree_base,
+                                &bf_residue_degree_cache_,
+                                log_radius_denominator)
+                        ? 1
+                        : -1;
+            }
         }
         if (index_one_refined_valid_ <= 0) {
             return false;
