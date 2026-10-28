@@ -655,6 +655,17 @@ struct ClassGroupContextStorage {
     // kernel and reset together with it.
     flint::FmpzMat saturation_relation_image_transform{0, 0};
     bool saturation_relation_image_valid = false;
+    // The beta coefficient rows already solved from
+    // saturation_relation_image_transform, one row per invariant index
+    // (ClassGroupRelationAccess::cached_invariant_generator_relation_rows):
+    // row i is valid when saturation_relation_solved_row_valid[i] is set,
+    // and is then the row solved_invariant_generator_relation_rows returns
+    // for index i, which does not depend on the other indices of the
+    // solve.  Lets the per-ell calls of relation_saturation_beta_coefficients
+    // solve each row once per presentation.  Built on first use and reset
+    // together with the image rows.
+    flint::FmpzMat saturation_relation_solved_rows{0, 0};
+    std::vector<bool> saturation_relation_solved_row_valid;
     // Integral Gram-Schmidt data of saturation_relation_kernel (Cohen,
     // GTM 138, Algorithm 2.6.7): a 1 x (m + 1) row d with d_0 = 1 and
     // d_{j+1} = d_j |b*_j|^2, and an m x m matrix lambda with
@@ -713,6 +724,8 @@ struct ClassGroupContextStorage {
         saturation_relation_kernel_valid = false;
         saturation_relation_image_transform = flint::FmpzMat(0, 0);
         saturation_relation_image_valid = false;
+        saturation_relation_solved_rows = flint::FmpzMat(0, 0);
+        saturation_relation_solved_row_valid.clear();
         saturation_relation_kernel_gram_d = flint::FmpzMat(0, 0);
         saturation_relation_kernel_gram_lambda = flint::FmpzMat(0, 0);
         saturation_relation_kernel_gram_valid = false;

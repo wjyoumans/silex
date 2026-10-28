@@ -394,6 +394,13 @@ public:
     static void note_beta_solved() noexcept {
         beta_solved_.fetch_add(1, std::memory_order_relaxed);
     }
+    // Counts each solve of beta coefficient rows that
+    // relation_saturation_beta_coefficients ran on the extension route's
+    // image rows; rows solved before for the same presentation are reused
+    // without one.
+    static void note_beta_solve_run() noexcept {
+        beta_solve_runs_.fetch_add(1, std::memory_order_relaxed);
+    }
     // Counts each extension-route basis that saturation_relation_kernel
     // kept from the row-subset attempt (also counted by
     // note_extension_kept).
@@ -410,6 +417,7 @@ private:
     inline static std::atomic<slong> injected_{0};
     inline static std::atomic<slong> extension_kept_{0};
     inline static std::atomic<slong> beta_solved_{0};
+    inline static std::atomic<slong> beta_solve_runs_{0};
     inline static std::atomic<slong> subset_kept_{0};
 };
 

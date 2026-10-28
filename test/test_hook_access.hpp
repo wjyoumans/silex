@@ -468,6 +468,13 @@ public:
                 std::memory_order_relaxed);
     }
 
+    // The number of beta coefficient row solves run on the extension
+    // route's image rows since the process started.
+    static slong saturation_beta_solve_runs() noexcept {
+        return SaturationKernelTestSeams::beta_solve_runs_.load(
+                std::memory_order_relaxed);
+    }
+
     // The number of extension-route saturation kernel bases kept from the
     // row-subset attempt since the process started.
     static slong saturation_kernel_subsets_kept() noexcept {

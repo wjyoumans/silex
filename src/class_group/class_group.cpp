@@ -6309,6 +6309,99 @@ public:
         return true;
     }
 
+    // solved_invariant_generator_relation_rows on the stored image rows of
+    // saturation_relation_kernel, memoised per invariant index in the
+    // private storage until the presentation changes
+    // (saturation_relation_solved_rows).  relation_saturation_beta_coefficients
+    // asks once per ell, and the image rows, relations, invariants and
+    // invariant_generator_matrix are the same on every call, so only the
+    // indices not solved before are solved, and the returned rows are read
+    // from the store.  The output is the one of the uncached call for the
+    // same indices: B = image * A is the same matrix on every call, and when
+    // fmpz_mat_solve finds it nonsingular, column b of its solution over the
+    // common denominator is the unique rational solution x_b of
+    // x_b * B = d_i * (V^-1)_i whatever the other columns, so the
+    // divisibility test, the row c = x_b * image and the exact check
+    // c * A == d_i * (V^-1)_i hold or fail row by row.  A row is stored only
+    // after a solve in which every row passed; a failed solve stores
+    // nothing and fails, as the uncached call for these indices would.
+    // Under the beta_solve test seam the call is not memoised, so the
+    // injected failure applies to every call.  Requires
+    // saturation_relation_image_valid.
+    static bool cached_invariant_generator_relation_rows(
+            flint::FmpzMat& out,
+            const ClassGroupContext& context,
+            const std::vector<slong>& indices) noexcept {
+        ClassGroupContextStorage* storage = context.private_storage_.get();
+        if (storage == nullptr || !storage->saturation_relation_image_valid) {
+            return false;
+        }
+        const flint::FmpzMatConstRef image(
+                storage->saturation_relation_image_transform);
+        if (SaturationKernelTestSeams::failure() ==
+            SaturationKernelTestFailure::beta_solve) {
+            return solved_invariant_generator_relation_rows(out, context,
+                                                            image, indices);
+        }
+        const slong n = context.quotient_.relation_count();
+        const slong invariant_count = context.quotient_.invariant_count();
+        const std::size_t stored =
+                static_cast<std::size_t>(invariant_count);
+        if (storage->saturation_relation_solved_row_valid.size() != stored) {
+            storage->saturation_relation_solved_rows =
+                    flint::FmpzMat(invariant_count, n);
+            storage->saturation_relation_solved_row_valid.assign(stored,
+                                                                 false);
+        }
+        std::vector<slong> missing;
+        for (const slong i : indices) {
+            if (i < 0 || i >= invariant_count) {
+                return false;
+            }
+            if (!storage->saturation_relation_solved_row_valid
+                         [static_cast<std::size_t>(i)] &&
+                std::find(missing.begin(), missing.end(), i) ==
+                        missing.end()) {
+                missing.push_back(i);
+            }
+        }
+        if (!missing.empty()) {
+            flint::FmpzMat solved(0, 0);
+            SaturationKernelTestSeams::note_beta_solve_run();
+            if (!solved_invariant_generator_relation_rows(solved, context,
+                                                          image, missing)) {
+                return false;
+            }
+            const flint::FmpzMatRef store(
+                    storage->saturation_relation_solved_rows);
+            for (std::size_t b = 0; b < missing.size(); ++b) {
+                for (slong j = 0; j < n; ++j) {
+                    flint::fmpz_set(
+                            flint::fmpz_mat_entry(store, missing[b], j),
+                            flint::fmpz_mat_entry(
+                                    flint::FmpzMatConstRef(solved),
+                                    static_cast<slong>(b), j));
+                }
+                storage->saturation_relation_solved_row_valid[static_cast<
+                        std::size_t>(missing[b])] = true;
+            }
+        }
+        const slong k = static_cast<slong>(indices.size());
+        flint::FmpzMat rows(k, n);
+        const flint::FmpzMatConstRef source(
+                storage->saturation_relation_solved_rows);
+        for (slong b = 0; b < k; ++b) {
+            const slong i = indices[static_cast<std::size_t>(b)];
+            for (slong j = 0; j < n; ++j) {
+                flint::fmpz_set(
+                        flint::fmpz_mat_entry(flint::FmpzMatRef(rows), b, j),
+                        flint::fmpz_mat_entry(source, i, j));
+            }
+        }
+        out = std::move(rows);
+        return true;
+    }
+
     // A basis of relation-kernel vectors for the relation-saturation beta
     // size reduction only, cached in the private storage until the presentation
     // changes.  Returns the storage holding it, or nullptr on failure.
@@ -11081,11 +11174,8 @@ bool relation_saturation_beta_coefficients(
     flint::FmpzMat coefficients(0, 0);
     std::vector<slong> row_index;
     if (kernel->saturation_relation_image_valid &&
-        ClassGroupRelationAccess::solved_invariant_generator_relation_rows(
-                coefficients, context,
-                flint::FmpzMatConstRef(
-                        kernel->saturation_relation_image_transform),
-                indices)) {
+        ClassGroupRelationAccess::cached_invariant_generator_relation_rows(
+                coefficients, context, indices)) {
         SaturationKernelTestSeams::note_beta_solved();
         row_index.resize(indices.size());
         for (std::size_t b = 0; b < indices.size(); ++b) {

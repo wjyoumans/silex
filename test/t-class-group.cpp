@@ -9525,6 +9525,20 @@ int test_relation_saturation_beta_rows_size_reduced() {
             assert(!silex::detail::relation_saturation_beta_coefficients(
                     refused, context, grh_units, sflint::FmpzConstRef(ell)));
         }
+        {
+            // The rows solved for this presentation are kept: a second call
+            // returns the same rows without another solve.
+            const slong runs =
+                    silex::detail::TestHookAccess::saturation_beta_solve_runs();
+            sflint::FmpzMat again(0, 0);
+            assert(silex::detail::relation_saturation_beta_coefficients(
+                    again, context, units, sflint::FmpzConstRef(ell)));
+            assert(sflint::fmpz_mat_equal(
+                    sflint::FmpzMatConstRef(again),
+                    sflint::FmpzMatConstRef(coefficients)));
+            assert(silex::detail::TestHookAccess::saturation_beta_solve_runs() ==
+                   runs);
+        }
         assert(sflint::fmpz_mat_nrows(sflint::FmpzMatConstRef(coefficients)) ==
                beta_count);
         for (slong b = 0; b < beta_count; ++b) {
