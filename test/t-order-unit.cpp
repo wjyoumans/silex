@@ -16459,6 +16459,218 @@ int test_grh_coarse_stop_records_coarse_bf_audit() {
     return 0;
 }
 
+// The free generators of `units` raised to `exponent`: a full-rank
+// subgroup of index exponent^rank.
+silex::OrderUnitGroup power_unit_sublattice(const silex::OrderUnitGroup& units,
+                                            const silex::Order& order,
+                                            const silex::NumberField& field,
+                                            slong exponent) {
+    silex::EmbeddingContext embeddings(field);
+    std::vector<silex::FactoredElement> powers;
+    for (slong i = 0; i < units.free_rank(); ++i) {
+        silex::FactoredElement generator(field);
+        assert(units.free_generator(generator, i));
+        silex::FactoredElement power(field);
+        for (slong j = 0; j < generator.length(); ++j) {
+            slong generator_exponent = 0;
+            assert(generator.exponent(generator_exponent, j));
+            assert(generator.factor(j) != nullptr);
+            assert(power.push(*generator.factor(j),
+                              exponent * generator_exponent));
+        }
+        powers.push_back(std::move(power));
+    }
+    silex::OrderUnitGroup sublattice(order);
+    assert(sublattice.set_units(
+            order, silex::FactoredElementSpan(powers.data(), powers.size()),
+            embeddings, 128));
+    assert(sublattice.free_rank() == units.free_rank());
+    return sublattice;
+}
+
+// The grh index bound of a validation pass on the cubic field
+// x^3 - x^2 - 2x + 1 (h = 1, unit rank 2), for unit subgroups of index
+// e^2.  The coarse index-one value does not show index one, so the refined
+// Belabas-Friedman value (log radius below 1/max(8, 2B), B the coarse
+// bound) is tried.  For e = 2 its index enclosure holds the single integer
+// 4 and gives the bound; the default hR is not computed, and the bound is
+// the one the default hR gives.  For e = 40 no cutoff up to the default
+// maximum reaches that radius, so the default hR gives the bound.
+int test_grh_index_bound_refined_value_before_default() {
+    static constexpr slong coefficients[] = {1, -2, -1, 1};
+    sflint::FmpzPoly polynomial;
+    for (slong i = 0; i < 4; ++i) {
+        sflint::fmpz_poly_set_coeff_si(polynomial, i, coefficients[i]);
+    }
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpzPolyConstRef(polynomial));
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation));
+
+    silex::ClassGroupComputeOptions options;
+    options.requested_certification = silex::CertificationMode::grh;
+    sflint::Fmpz bound;
+    assert(silex::factor_base_class_group_bound(sflint::FmpzRef(bound),
+                                                order));
+    if (sflint::fmpz_cmp_ui(sflint::FmpzConstRef(bound), 2) < 0) {
+        sflint::fmpz_set_ui(sflint::FmpzRef(bound), 2);
+    }
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    silex::detail::ClassUnitTransactionReport audit;
+    assert(silex::detail::compute_class_unit_transaction(
+            units, class_group, order, sflint::FmpzConstRef(bound), options,
+            128, audit));
+    assert(audit.final_result_published);
+    assert(units.free_rank() == 2);
+
+    silex::DiagnosticsContext diagnostics;
+    silex::diagnostics_context_init(diagnostics);
+    ScopeCounter refined_runs;
+    refined_runs.label = "unit_group.validation_analytic_index_bound."
+                         "ensure_refined_product";
+    ScopeCounter default_runs;
+    default_runs.label =
+            "unit_group.validation_analytic_index_bound.ensure_product";
+    struct Counters {
+        ScopeCounter* refined;
+        ScopeCounter* fallback;
+    } counters{&refined_runs, &default_runs};
+    silex::diagnostics_set_profiling(
+            diagnostics, true,
+            silex::diagnostics_module_bit(
+                    silex::DiagnosticsModule::unit_group),
+            [](void* user, silex::DiagnosticsModule module,
+               silex::ProfileEvent event, const char* file,
+               const char* label) noexcept {
+                Counters* both = static_cast<Counters*>(user);
+                scope_begin_callback(both->refined, module, event, file,
+                                     label);
+                scope_begin_callback(both->fallback, module, event, file,
+                                     label);
+            },
+            &counters);
+
+    // The bound the default hR gives: with the default value cached, the
+    // coarse and refined values are not tried.
+    const auto default_bound = [&](const silex::OrderUnitGroup& subgroup,
+                                   sflint::Fmpz& out) {
+        silex::detail::AnalyticClassRegulatorCache default_cache;
+        assert(default_cache.ensure(order, 128, nullptr,
+                                    class_group.factor_base(), false, true));
+        assert(silex::detail::analytic_index_bound_for_validation(
+                out, subgroup, class_group, default_cache, order, 128,
+                true));
+    };
+
+    silex::OrderUnitGroup index_four =
+            power_unit_sublattice(units, order, field, 2);
+    index_four.set_diagnostics(&diagnostics);
+    silex::detail::AnalyticClassRegulatorCache analytic_cache;
+    sflint::Fmpz refined_bound;
+    assert(silex::detail::analytic_index_bound_for_validation(
+            refined_bound, index_four, class_group, analytic_cache, order,
+            128, true));
+    index_four.set_diagnostics(nullptr);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    assert(refined_runs.count == 1);
+    assert(default_runs.count == 0);
+#endif
+    assert(silex::detail::validation_index_enclosure_has_single_integer(
+            index_four, class_group, analytic_cache.value(), 128));
+    const silex::detail::ZetaBfRouteAudit* refined_audit =
+            analytic_cache.value_bf_audit();
+    assert(refined_audit != nullptr);
+    sflint::Arb eighth;
+    sflint::arb_set_d(eighth, 0.125);
+    assert(sflint::arb_lt(refined_audit->error_bound, eighth));
+    // ensure_index_one() declines once the default hR is cached, so this
+    // shows the default hR was not computed.
+    assert(analytic_cache.ensure_index_one(order, 128));
+    sflint::Fmpz expected;
+    default_bound(index_four, expected);
+    assert(sflint::fmpz_cmp_ui(sflint::FmpzConstRef(expected), 4) > 0);
+    assert(sflint::fmpz_equal(sflint::FmpzConstRef(refined_bound),
+                              sflint::FmpzConstRef(expected)));
+
+    refined_runs.count = 0;
+    default_runs.count = 0;
+    silex::OrderUnitGroup index_1600 =
+            power_unit_sublattice(units, order, field, 40);
+    index_1600.set_diagnostics(&diagnostics);
+    silex::detail::AnalyticClassRegulatorCache fallback_cache;
+    sflint::Fmpz fallback_bound;
+    assert(silex::detail::analytic_index_bound_for_validation(
+            fallback_bound, index_1600, class_group, fallback_cache, order,
+            128, true));
+    index_1600.set_diagnostics(nullptr);
+#if defined(SILEX_ENABLE_PROFILING) && SILEX_ENABLE_PROFILING
+    assert(refined_runs.count == 1);
+    assert(default_runs.count == 1);
+#endif
+    assert(!fallback_cache.ensure_index_one(order, 128));
+    default_bound(index_1600, expected);
+    assert(sflint::fmpz_cmp_ui(sflint::FmpzConstRef(expected), 1600) > 0);
+    assert(sflint::fmpz_equal(sflint::FmpzConstRef(fallback_bound),
+                              sflint::FmpzConstRef(expected)));
+    return 0;
+}
+
+// The single-integer rule of the refined grh index bound on enclosures of
+// h_cand R_cand / hR built around the candidate of an index-4 unit
+// subgroup: one integer inside, two integers inside, and none.
+int test_validation_index_enclosure_single_integer_rule() {
+    static constexpr slong coefficients[] = {1, -2, -1, 1};
+    sflint::FmpzPoly polynomial;
+    for (slong i = 0; i < 4; ++i) {
+        sflint::fmpz_poly_set_coeff_si(polynomial, i, coefficients[i]);
+    }
+    silex::NumberField field = silex::test::field_by_polynomial(
+            sflint::FmpzPolyConstRef(polynomial));
+    silex::Order equation = silex::test::equation_order(field);
+    silex::Order order(field);
+    assert(order.maximal_order(equation));
+    silex::ClassGroupComputeOptions options;
+    options.requested_certification = silex::CertificationMode::grh;
+    sflint::Fmpz bound;
+    assert(silex::factor_base_class_group_bound(sflint::FmpzRef(bound),
+                                                order));
+    if (sflint::fmpz_cmp_ui(sflint::FmpzConstRef(bound), 2) < 0) {
+        sflint::fmpz_set_ui(sflint::FmpzRef(bound), 2);
+    }
+    silex::ClassGroupContext class_group;
+    silex::OrderUnitGroup units;
+    silex::detail::ClassUnitTransactionReport audit;
+    assert(silex::detail::compute_class_unit_transaction(
+            units, class_group, order, sflint::FmpzConstRef(bound), options,
+            128, audit));
+    silex::OrderUnitGroup index_four =
+            power_unit_sublattice(units, order, field, 2);
+    sflint::Arb candidate;
+    assert(index_four.class_regulator_product(sflint::ArbRef(candidate),
+                                              class_group, 128));
+
+    // analytic = candidate / quotient, widened by `relative` of itself.
+    const auto enclosure_has_single_integer = [&](double quotient,
+                                                  double relative) {
+        sflint::Arb analytic;
+        sflint::Arb divisor;
+        sflint::Arb radius;
+        sflint::arb_set_d(divisor, quotient);
+        sflint::arb_div(analytic, candidate, divisor, 128);
+        sflint::arb_set_d(radius, relative);
+        sflint::arb_mul(radius, radius, analytic, 128);
+        sflint::arb_add_error(analytic, radius);
+        return silex::detail::validation_index_enclosure_has_single_integer(
+                index_four, class_group, sflint::ArbConstRef(analytic), 128);
+    };
+    assert(enclosure_has_single_integer(4.0, 0.01));
+    assert(!enclosure_has_single_integer(4.5, 0.2));
+    assert(!enclosure_has_single_integer(4.5, 0.01));
+    return 0;
+}
+
 // The LLL relation slice rejects an extension relation target below 2, as
 // extend_tentative_relations_ does.  With a target of 0 the slice would
 // collect no relation; on Q(sqrt -2) (h = 1) it would still report success.
@@ -16588,6 +16800,8 @@ int main() {
     test_lll_relation_slice_rejects_small_extension_target();
     test_grh_validation_stop_retries_coarse_index_one();
     test_grh_coarse_stop_records_coarse_bf_audit();
+    test_grh_index_bound_refined_value_before_default();
+    test_validation_index_enclosure_single_integer_rule();
     test_grh_validation_saturation_memo_replays_unchanged_pass();
     test_grh_validation_saturation_memo_invalidated_by_change();
     test_grh_validation_saturation_deferred_until_extension_stalls();

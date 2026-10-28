@@ -4110,7 +4110,9 @@ bool bf_log_residue_default(flint::ArbRef out,
 // reference Zeta.jl:_residue_approx_bf, 2^-20 of the target is reserved
 // for the numerical radius of the BF term, the cutoff is the least one
 // whose truncation bound is below the rest, and the term starts at 64 bits
-// and doubles.
+// and doubles.  The grh index bound also asks this route for a narrower
+// value, a target 1/q with q > 4 (analytic_index_bound_for_validation); the
+// bound and the cutoff rule are the same.
 //
 // Theorem 7 (same hypotheses as Theorem 1: GRH for zeta_K and zeta_Q; any
 // X > 9 and sigma > 1):
@@ -4126,7 +4128,8 @@ bool bf_log_residue_default(flint::ArbRef out,
 // sigma = 1 + 1/sqrt(log D) is the choice the paper suggests (p. 13); it is
 // rounded to an exact binary value so that the bound is evaluated at one
 // sigma.
-constexpr ulong kBfIndexOneTargetDenominator = UWORD(4);
+constexpr ulong kBfIndexOneTargetDenominator =
+        detail::kZetaBfIndexOneLogRadiusDenominator;
 constexpr slong kBfIndexOneBoundPrecision = WORD(64);
 
 struct BfTheorem7Context {
@@ -4465,8 +4468,10 @@ bool bf_select_theorem7_cutoff(ulong& cutoff_out,
 }
 
 // The grh index-one log residue: f_K(X) at the Theorem 7 cutoff plus that
-// bound, with a total radius below 1/4.  Fails, without writing `audit`,
-// when no cutoff up to the default maximum reaches the target.
+// bound, with a total radius below 1/`log_radius_denominator` (1/4 for the
+// coarse index-one test; a larger denominator gives a narrower value at a
+// larger cutoff).  Fails, without writing `audit`, when the denominator is
+// below 4 or no cutoff up to the default maximum reaches the target.
 bool bf_log_residue_index_one(flint::ArbRef out,
                               detail::ZetaBfRouteAudit& audit,
                               const Order& order,
@@ -4474,10 +4479,12 @@ bool bf_log_residue_index_one(flint::ArbRef out,
                               const DiagnosticsContext* diagnostics,
                               const FactorBase* residue_degree_base,
                               detail::ZetaBfResidueDegreeCache*
-                                      residue_degree_cache) noexcept {
+                                      residue_degree_cache,
+                              ulong log_radius_denominator) noexcept {
     SILEX_PROFILE_SCOPE(diagnostics, DiagnosticsModule::unit_group,
                         "unit_group.zeta_bf.index_one.log_residue");
-    if (!supported_order(order, precision) || order.degree() <= 1) {
+    if (!supported_order(order, precision) || order.degree() <= 1 ||
+        log_radius_denominator < kBfIndexOneTargetDenominator) {
         return false;
     }
 
@@ -4485,7 +4492,7 @@ bool bf_log_residue_index_one(flint::ArbRef out,
     flint::Arb numerical_radius_target;
     flint::Arb tail_target;
     flint::arb_one(target);
-    flint::arb_div_ui(target, target, kBfIndexOneTargetDenominator,
+    flint::arb_div_ui(target, target, log_radius_denominator,
                       kBfIndexOneBoundPrecision);
     flint::arb_one(numerical_radius_target);
     flint::arb_mul_2exp_si(numerical_radius_target, numerical_radius_target,
@@ -5047,7 +5054,8 @@ bool zeta_class_regulator_product_index_one_with_diagnostics(
         slong precision,
         const DiagnosticsContext* diagnostics,
         const FactorBase* residue_degree_base,
-        ZetaBfResidueDegreeCache* residue_degree_cache) noexcept {
+        ZetaBfResidueDegreeCache* residue_degree_cache,
+        ulong log_radius_denominator) noexcept {
     SILEX_PROFILE_SCOPE(
             diagnostics, DiagnosticsModule::unit_group,
             "unit_group.zeta_bf.index_one.class_regulator_product");
@@ -5059,8 +5067,8 @@ bool zeta_class_regulator_product_index_one_with_diagnostics(
     ZetaBfRouteAudit local_audit;
     if (!bf_log_residue_index_one(flint::ArbRef(log_residue), local_audit,
                                   order, precision, diagnostics,
-                                  residue_degree_base,
-                                  residue_degree_cache)) {
+                                  residue_degree_base, residue_degree_cache,
+                                  log_radius_denominator)) {
         return false;
     }
 

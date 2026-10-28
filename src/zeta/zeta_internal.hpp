@@ -131,7 +131,7 @@ struct ZetaBfResidueDegreeCache {
 // the precision target, so `cutoff` may equal `max_cutoff`.  The grh
 // index-one route (zeta_class_regulator_product_index_one_with_diagnostics)
 // fills the same fields, with the error bound of Belabas-Friedman 2015,
-// Theorem 7, below 1/4.
+// Theorem 7, below 1/4 (or below 1/q for a log-radius denominator q > 4).
 struct ZetaBfRouteAudit {
     flint::Arb error_bound;
     ulong cutoff = 0;
@@ -313,12 +313,19 @@ bool zeta_class_regulator_product_validation_with_diagnostics(
         const FactorBase* residue_degree_base = nullptr,
         ZetaBfResidueDegreeCache* residue_degree_cache = nullptr) noexcept;
 
+// The log-radius denominator of the coarse grh index-one value: its log
+// residue has radius below 1/4.
+inline constexpr ulong kZetaBfIndexOneLogRadiusDenominator = 4;
+
 // The Belabas-Friedman hR for the grh analytic index-one test: the log
 // residue f_K(X) at the least cutoff X (a multiple of 9 up to the default
 // route's maximum) whose Belabas-Friedman 2015 Theorem 7 bound, with
-// sigma = 1 + 1/sqrt(log D), is below 1/4 - 2^-20, so that the log residue
-// has radius below 1/4, enough for the index-one test (Belabas-Friedman
-// 2015, p. 1, footnote 1: below (1/2) log 2).  Valid under GRH for zeta_K
+// sigma = 1 + 1/sqrt(log D), is below 1/q - 2^-20, q =
+// `log_radius_denominator`, so that the log residue has radius below 1/q.
+// With q = 4 that is enough for the index-one test (Belabas-Friedman
+// 2015, p. 1, footnote 1: below (1/2) log 2); a larger q narrows the
+// value for the grh index bound (analytic_index_bound_for_validation), and
+// a q below 4 fails.  Valid under GRH for zeta_K
 // and zeta_Q, in every degree above one, including a quadratic order that
 // also has the unconditional L(1, chi) route: its only caller serves grh
 // requests, which accept a GRH-conditional hR.  `audit` receives the
@@ -333,7 +340,9 @@ bool zeta_class_regulator_product_index_one_with_diagnostics(
         slong precision,
         const DiagnosticsContext* diagnostics,
         const FactorBase* residue_degree_base = nullptr,
-        ZetaBfResidueDegreeCache* residue_degree_cache = nullptr) noexcept;
+        ZetaBfResidueDegreeCache* residue_degree_cache = nullptr,
+        ulong log_radius_denominator =
+                kZetaBfIndexOneLogRadiusDenominator) noexcept;
 
 bool zeta_bf_audit_cutoff_available(const Order& order,
                                     ulong max_cutoff,

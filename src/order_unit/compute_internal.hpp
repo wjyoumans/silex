@@ -188,8 +188,8 @@ bool analytic_class_regulator_product_for_validation(
         bool accept_grh_residue = false) noexcept;
 
 // The grh index-one hR (zeta_class_regulator_product_index_one_with_
-// diagnostics): a Belabas-Friedman value with log radius below 1/4, enough
-// for the analytic index-one test only.
+// diagnostics): a Belabas-Friedman value with log radius below
+// 1/`log_radius_denominator` (1/4 for the coarse index-one test).
 bool index_one_class_regulator_product_for_validation(
         flint::ArbRef out,
         ZetaBfRouteAudit& audit,
@@ -197,7 +197,9 @@ bool index_one_class_regulator_product_for_validation(
         slong precision,
         const DiagnosticsContext* diagnostics,
         const FactorBase* residue_degree_base,
-        ZetaBfResidueDegreeCache* residue_degree_cache) noexcept;
+        ZetaBfResidueDegreeCache* residue_degree_cache,
+        ulong log_radius_denominator =
+                kZetaBfIndexOneLogRadiusDenominator) noexcept;
 
 bool bf_class_regulator_product_for_validation(
         flint::ArbRef out,
@@ -326,8 +328,12 @@ public:
         if (validation_active_) {
             return flint::ArbConstRef(validation_value_);
         }
-        return index_one_active_ ? flint::ArbConstRef(index_one_value_)
-                                 : flint::ArbConstRef(value_);
+        if (index_one_active_) {
+            return index_one_refined_selected_
+                    ? flint::ArbConstRef(index_one_refined_value_)
+                    : flint::ArbConstRef(index_one_value_);
+        }
+        return flint::ArbConstRef(value_);
     }
 
     // True only when value() is an unconditional hR: degree one or the
@@ -347,7 +353,8 @@ public:
             return nullptr;
         }
         if (index_one_active_) {
-            return &index_one_audit_;
+            return index_one_refined_selected_ ? &index_one_refined_audit_
+                                               : &index_one_audit_;
         }
         return valid_ > 0 && value_bf_audit_valid_ ? &value_bf_audit_
                                                    : nullptr;
@@ -389,6 +396,59 @@ public:
         }
         validation_active_ = false;
         index_one_active_ = true;
+        index_one_refined_selected_ = false;
+        return true;
+    }
+
+    // As ensure_index_one, with a narrower Belabas-Friedman value: log
+    // radius below 1/`log_radius_denominator`, a denominator above 4.  It
+    // has its own slot, so the coarse value stays cached; a slot value at
+    // the same precision and a denominator at least as large (no wider)
+    // serves the call.  value() then is that value until the next
+    // ensure(), seed(), ensure_index_one() or ensure_validation().  The
+    // grh index bound uses it only when its index enclosure holds a single
+    // integer (analytic_index_bound_for_validation).
+    bool ensure_index_one_refined(const Order& order,
+                                  slong precision,
+                                  ulong log_radius_denominator,
+                                  const DiagnosticsContext* diagnostics =
+                                          nullptr,
+                                  const FactorBase* residue_degree_base =
+                                          nullptr) noexcept {
+        reset_for_order_if_needed_(order);
+        index_one_active_ = false;
+        if (validation_enabled_ || precision <= 0 ||
+            log_radius_denominator <= kZetaBfIndexOneLogRadiusDenominator ||
+            (valid_ > 0 && precision_ >= precision)) {
+            return false;
+        }
+        const bool slot_serves =
+                index_one_refined_valid_ != 0 &&
+                index_one_refined_precision_ == precision &&
+                (index_one_refined_valid_ > 0
+                         ? index_one_refined_denominator_ >=
+                                   log_radius_denominator
+                         : index_one_refined_denominator_ ==
+                                   log_radius_denominator);
+        if (!slot_serves) {
+            index_one_refined_precision_ = precision;
+            index_one_refined_denominator_ = log_radius_denominator;
+            index_one_refined_valid_ =
+                    index_one_class_regulator_product_for_validation(
+                            flint::ArbRef(index_one_refined_value_),
+                            index_one_refined_audit_, order, precision,
+                            diagnostics, residue_degree_base,
+                            &bf_residue_degree_cache_,
+                            log_radius_denominator)
+                    ? 1
+                    : -1;
+        }
+        if (index_one_refined_valid_ <= 0) {
+            return false;
+        }
+        validation_active_ = false;
+        index_one_active_ = true;
+        index_one_refined_selected_ = true;
         return true;
     }
 
@@ -530,6 +590,7 @@ public:
         validation_valid_ = 0;
         validation_active_ = false;
         index_one_valid_ = 0;
+        index_one_refined_valid_ = 0;
         index_one_active_ = false;
         SILEX_PROFILE_EVENT(
                 diagnostics, DiagnosticsModule::unit_group,
@@ -577,6 +638,14 @@ private:
     slong index_one_precision_ = 0;
     int index_one_valid_ = 0;
     bool index_one_active_ = false;
+    // The ensure_index_one_refined slot; index_one_active_ with
+    // index_one_refined_selected_ makes it value().
+    flint::Arb index_one_refined_value_;
+    ZetaBfRouteAudit index_one_refined_audit_;
+    slong index_one_refined_precision_ = 0;
+    ulong index_one_refined_denominator_ = 0;
+    int index_one_refined_valid_ = 0;
+    bool index_one_refined_selected_ = false;
     ZetaBfResidueDegreeCache bf_residue_degree_cache_;
     Order bf_residue_degree_cache_order_;
     bool bf_residue_degree_cache_has_order_ = false;
@@ -592,6 +661,7 @@ private:
         validation_valid_ = 0;
         validation_active_ = false;
         index_one_valid_ = 0;
+        index_one_refined_valid_ = 0;
         index_one_active_ = false;
     }
 
@@ -611,6 +681,7 @@ private:
         validation_valid_ = 0;
         validation_active_ = false;
         index_one_valid_ = 0;
+        index_one_refined_valid_ = 0;
         index_one_active_ = false;
     }
 };
@@ -670,6 +741,27 @@ GrhIndexOneTest grh_validation_index_one_test(
         const ClassGroupContext& class_group,
         AnalyticClassRegulatorCache& analytic_cache,
         const Order& order,
+        slong precision) noexcept;
+// The analytic index bound of the validation loop (validation.cpp): for a
+// grh request (`accept_grh_generation`) the coarse index-one value, then the
+// refined value when its index enclosure holds a single integer, then the
+// default hR; otherwise the default hR.
+bool analytic_index_bound_for_validation(
+        flint::Fmpz& index_bound,
+        const OrderUnitGroup& units,
+        const ClassGroupContext& class_group,
+        AnalyticClassRegulatorCache& analytic_cache,
+        const Order& order,
+        slong precision,
+        bool accept_grh_generation) noexcept;
+// True when the enclosure of h_cand R_cand / hR at `precision` (the quotient
+// whose upper endpoint's ceiling is the index bound) holds exactly one
+// integer: the ceiling of its lower endpoint equals the floor of its upper
+// endpoint.
+bool validation_index_enclosure_has_single_integer(
+        const OrderUnitGroup& units,
+        const ClassGroupContext& class_group,
+        flint::ArbConstRef analytic_class_regulator_product,
         slong precision) noexcept;
 // The unit search's stop test after an improvement of a full-rank unit
 // group (compute.cpp).  It takes the expected regulator once and keeps it

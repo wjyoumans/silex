@@ -92,10 +92,11 @@ bool index_one_class_regulator_product_for_validation(
         slong precision,
         const DiagnosticsContext* diagnostics,
         const FactorBase* residue_degree_base,
-        ZetaBfResidueDegreeCache* residue_degree_cache) noexcept {
+        ZetaBfResidueDegreeCache* residue_degree_cache,
+        ulong log_radius_denominator) noexcept {
     return detail::zeta_class_regulator_product_index_one_with_diagnostics(
             out, audit, order, precision, diagnostics, residue_degree_base,
-            residue_degree_cache);
+            residue_degree_cache, log_radius_denominator);
 }
 
 bool bf_class_regulator_product_for_validation(
@@ -278,13 +279,15 @@ enum class CoarseIndexOneOutcome {
 // The grh coarse index-one test of analytic_index_bound_for_validation on
 // its own: the Belabas-Friedman hR accurate enough to recognize index one
 // (ensure_index_one), compared with the candidate h R.  It never computes
-// the default hR.
+// the default hR.  `coarse_index_bound`, when given, receives the coarse
+// value's index bound on index_one and index_above_one.
 CoarseIndexOneOutcome coarse_index_one_outcome(
         const OrderUnitGroup& units,
         const ClassGroupContext& class_group,
         AnalyticClassRegulatorCache& analytic_cache,
         const Order& order,
-        slong precision) noexcept {
+        slong precision,
+        flint::Fmpz* coarse_index_bound_out = nullptr) noexcept {
     bool have_index_one_value = false;
     {
         SILEX_PROFILE_SCOPE(
@@ -304,9 +307,118 @@ CoarseIndexOneOutcome coarse_index_one_outcome(
                 analytic_cache.value(), precision, true)) {
         return CoarseIndexOneOutcome::no_index_bound;
     }
+    if (coarse_index_bound_out != nullptr) {
+        flint::fmpz_set(flint::FmpzRef(*coarse_index_bound_out),
+                        flint::FmpzConstRef(coarse_index_bound));
+    }
     return flint::fmpz_is_one(flint::FmpzConstRef(coarse_index_bound))
             ? CoarseIndexOneOutcome::index_one
             : CoarseIndexOneOutcome::index_above_one;
+}
+
+}  // namespace
+
+bool validation_index_enclosure_has_single_integer(
+        const OrderUnitGroup& units,
+        const ClassGroupContext& class_group,
+        flint::ArbConstRef analytic_class_regulator_product,
+        slong precision) noexcept {
+    if (precision <= 0 || !units.is_set() ||
+        !flint::arb_is_finite(analytic_class_regulator_product) ||
+        !flint::arb_is_positive(analytic_class_regulator_product)) {
+        return false;
+    }
+    flint::Arb candidate_class_regulator_product;
+    if (!units.class_regulator_product(
+                flint::ArbRef(candidate_class_regulator_product),
+                class_group, precision) ||
+        !flint::arb_is_finite(candidate_class_regulator_product) ||
+        !flint::arb_is_positive(candidate_class_regulator_product)) {
+        return false;
+    }
+    // The quotient of class_regulator_index_bound_from_candidate_product,
+    // whose upper endpoint's ceiling is the index bound.
+    flint::Arb quotient;
+    ::arb_div(quotient.raw(), candidate_class_regulator_product.raw(),
+              analytic_class_regulator_product.raw(), precision);
+    if (!flint::arb_is_finite(quotient) || !flint::arb_is_positive(quotient)) {
+        return false;
+    }
+    flint::Arf lower;
+    flint::Arf upper;
+    flint::arb_get_lbound_arf(lower, quotient, precision);
+    flint::arb_get_ubound_arf(upper, quotient, precision);
+    if (!flint::arf_is_finite(lower) || !flint::arf_is_finite(upper)) {
+        return false;
+    }
+    flint::Fmpz least;
+    flint::Fmpz greatest;
+    flint::arf_get_fmpz(least, lower, ARF_RND_CEIL);
+    flint::arf_get_fmpz(greatest, upper, ARF_RND_FLOOR);
+    return flint::fmpz_equal(flint::FmpzConstRef(least),
+                             flint::FmpzConstRef(greatest));
+}
+
+namespace {
+
+// The refined step of the grh index bound, between the coarse index-one
+// value and the default hR: a Belabas-Friedman hR with log radius below
+// 1/q, q = max(8, 2 B) for the coarse value's index bound B
+// (ensure_index_one_refined), used only when the enclosure of
+// h_cand R_cand / hR holds a single integer k.  With the generation
+// prerequisites the quotient is the class/unit index, an integer, and
+// under GRH both values enclose it (Belabas-Friedman 2015, Theorem 7 for
+// this one, Theorem 1 for the default route), so it is k, and the index
+// bound this value gives, the ceiling of the upper endpoint, is the one the
+// default hR gives whenever that hR's upper endpoint also lies in
+// (k, k + 1) (or both shortcut to index one).  q only schedules the work:
+// with true index k <= B and relative width about 2/q the enclosure is at
+// most about one unit wide.  Returns false, leaving the default hR to
+// decide, when the prerequisites fail, B is too large for q, the value is
+// unavailable (no cutoff up to the default maximum reaches 1/q), or the
+// enclosure holds two or more integers or none.
+bool refined_index_bound_for_validation(
+        flint::Fmpz& index_bound,
+        const OrderUnitGroup& units,
+        const ClassGroupContext& class_group,
+        AnalyticClassRegulatorCache& analytic_cache,
+        const Order& order,
+        slong precision,
+        const flint::Fmpz& coarse_index_bound) noexcept {
+    constexpr ulong kMinDenominator = 2 * kZetaBfIndexOneLogRadiusDenominator;
+    if (!validation_integer_index_prerequisites(class_group, true) ||
+        flint::fmpz_sgn(flint::FmpzConstRef(coarse_index_bound)) <= 0 ||
+        flint::fmpz_cmp_ui(flint::FmpzConstRef(coarse_index_bound),
+                           UWORD_MAX / 2) > 0) {
+        return false;
+    }
+    const ulong denominator = FLINT_MAX(
+            kMinDenominator,
+            2 * flint::fmpz_get_ui(flint::FmpzConstRef(coarse_index_bound)));
+    bool have_refined_value = false;
+    {
+        SILEX_PROFILE_SCOPE(
+                units.diagnostics(), DiagnosticsModule::unit_group,
+                "unit_group.validation_analytic_index_bound."
+                "ensure_refined_product");
+        have_refined_value = analytic_cache.ensure_index_one_refined(
+                order, precision, denominator, units.diagnostics(),
+                class_group.factor_base());
+    }
+    if (!have_refined_value) {
+        return false;
+    }
+    if (!validation_index_enclosure_has_single_integer(
+                units, class_group, analytic_cache.value(), precision)) {
+        SILEX_PROFILE_EVENT(
+                units.diagnostics(), DiagnosticsModule::unit_group,
+                "unit_group.validation_analytic_index_bound."
+                "refined_product_ambiguous");
+        return false;
+    }
+    return validation_index_bound_from_product(
+            index_bound, units, class_group, analytic_cache.value(),
+            precision, true);
 }
 
 }  // namespace
@@ -350,12 +462,16 @@ bool analytic_index_bound_for_validation(
     // A grh request first tries a Belabas-Friedman hR that is only accurate
     // enough to recognize index one (log radius below 1/4; Belabas-Friedman
     // 2015, p. 1, footnote 1, and Theorem 7 for the cutoff).  Index one
-    // from it is accepted as is; any other outcome is recomputed below
-    // from the default hR, so every index bound above one, and every
-    // failure, comes from the same value as before.
+    // from it is accepted as is.  When it shows an index above one, a
+    // narrower value of the same route gives the bound if its enclosure
+    // holds a single integer (refined_index_bound_for_validation).  Any
+    // other outcome is recomputed below from the default hR, so every
+    // failure comes from the same value as before.
     if (accept_grh_generation) {
+        flint::Fmpz coarse_index_bound;
         const CoarseIndexOneOutcome coarse = coarse_index_one_outcome(
-                units, class_group, analytic_cache, order, precision);
+                units, class_group, analytic_cache, order, precision,
+                &coarse_index_bound);
         if (coarse == CoarseIndexOneOutcome::index_one) {
             flint::fmpz_one(flint::FmpzRef(index_bound));
             return true;
@@ -365,6 +481,12 @@ bool analytic_index_bound_for_validation(
                     units.diagnostics(), DiagnosticsModule::unit_group,
                     "unit_group.validation_analytic_index_bound."
                     "index_one_product_refined");
+        }
+        if (coarse == CoarseIndexOneOutcome::index_above_one &&
+            refined_index_bound_for_validation(
+                    index_bound, units, class_group, analytic_cache, order,
+                    precision, coarse_index_bound)) {
+            return true;
         }
     }
     {
