@@ -2437,14 +2437,12 @@ Changed
   ``relation_saturation_status()`` and its per-ell records are as before.
   On ``simplest_cubic_a0`` the extension relation reaches index one before
   the pass runs, and the status is ``not_checked`` instead of ``verified``.
-  ``proven`` requests are unchanged.
-
-- A ``grh`` class/unit computation keeps the deferred bounded ``ell = 2``
-  class-relation saturation pending while relation-extension slices append
-  relations, instead of running it after the first slice that left the index
-  bound unchanged.  Outputs, statuses and proof labels are identical on all
-  172 ``grh`` rows of the class/unit benchmark corpus; instruction counts
-  fall by 25.6% on ``lmfdb_8_8_73116160000_2``.
+  ``proven`` requests are unchanged.  Outputs, statuses and proof labels are
+  identical on 171 of the 172 ``grh`` rows of the class/unit benchmark corpus
+  (``cyclotomic_real_163_deg81`` timed out on both sides and was not
+  compared); instruction counts fall by 25.6% on
+  ``lmfdb_8_8_73116160000_2``.  With a user-set ``max_relations`` the
+  deferred pass may not run before the relation budget is exhausted.
 
 - Unit-basis reduction of the stored units no longer lets their factored
   form grow without bound.  When a transform would give the stored units more

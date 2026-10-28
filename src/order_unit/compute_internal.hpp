@@ -744,8 +744,11 @@ struct RelationSaturationMemo {
     // relations of the last deferred pass
     // (run_deferred_class_relation_saturation); from then on every pass runs
     // as without deferral.  The deferral only reorders the pass and the
-    // extension: the pass still runs before the loop gives up for lack of
-    // relations, and grh acceptance never rests on this saturation.
+    // extension: the pass runs before the loop gives up when extension
+    // fails for another reason, but a user-set max_relations can stop
+    // extension at the relation limit, where the pass returns at once and
+    // may never run before relation_search_budget_exhausted.  grh acceptance
+    // never rests on this saturation.
     bool defer_until_extension_stalls = false;
     // True once a failed or empty extension or an acceptance has run the
     // deferred pass.
