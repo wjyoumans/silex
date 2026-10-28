@@ -2178,7 +2178,8 @@ counts imprimitive forms when ``D`` is not fundamental, so the count is
 gated on ``D`` being fundamental (``D = 1 mod 4`` with ``|D|`` squarefree, or
 ``D = 4m`` with ``m = 2, 3 mod 4`` squarefree; Cohen, GTM 138, Definition 5.1.2); any other ``D`` keeps
 the listing of ``qfb_reduced_forms``, which returns the primitive forms, for
-``|D| < 2^44``.  The count needs about 5 bytes per ``a <= sqrt(|D| / 3)``
+``|D| < 2^44``; a non-fundamental ``D`` with ``2^44 <= |D| < 2^54`` goes to
+the class number formula below.  The count needs about 5 bytes per ``a <= sqrt(|D| / 3)``
 (about 390 MB just below ``2^54``) and time growing like ``sqrt(|D|)``; the
 cutoff ``2^54`` bounds that memory (see
 :doc:`../development/class_number_route_cutoff`).  For ``|D| >= 2^54``
@@ -2230,8 +2231,9 @@ is therefore a Silex cost parameter, adopted as an approved change of the
 precision rule, and not a source's precision rule.
 
 At ``|D| = 1e14 + 31`` a direct call of this function gives
-``h = 14414435``, PARI's value.  A full proven run reaches this step at such
-sizes only through the structure certificate route described below.
+``h = 14414435``, PARI's value.  A full proven run reaches this step only from
+``|D| >= 2^54``, through the structure certificate route described below;
+below ``2^54`` the reduced-form count above gives ``h(D)``.
 With generation verified up to the Minkowski-type bound and ``h_cand = h``,
 the computed relation lattice has index one in the full one, so it is
 saturated at every prime.  The route stores a verified relation-saturation
@@ -2283,10 +2285,10 @@ group (the ``Cl(-199)`` example of the route's design), which is why the
 certification ``proven`` and no generation bound
 (``factor_base_generation_certification_bound`` is false).  For
 ``x^2 + 1000000000039`` a ``proven`` request now succeeds in under a second
-with ``h = 1113261`` (the factor base would have 23592 generators).  The
-largest tested proven run on this route is at ``|D|`` of order ``1e12``;
-``h(D)`` alone takes about 100 s at ``|D| = 1e14`` and its cost grows like
-``sqrt(|D|)``; ``fmpz_fits_si`` limits ``D`` to ``|D| < 2^63``.  When the
+with ``h = 1113261`` (the factor base would have 23592 generators).  Proven
+runs at ``|D|`` of order ``1e14`` and about ``1.8e16`` are tested;
+``h(D)`` alone takes about a second at ``|D| = 1e14`` (by the count), and the
+formula's cost, used from ``2^54``, grows like ``sqrt(|D|)``; ``fmpz_fits_si`` limits ``D`` to ``|D| < 2^63``.  When the
 structure certificate fails, or the relation index is below ``h``, the run
 fails closed with the generic reason ``class_unit_computation_failed``, with
 no fallback.

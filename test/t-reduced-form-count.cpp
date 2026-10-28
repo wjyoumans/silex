@@ -124,8 +124,8 @@ void check_fixed_rows() noexcept {
 
 // A non-fundamental D is refused by the count and takes FLINT's listing.
 // Above the listing cutoff 2^44 the count also refuses it, so the switch
-// passes it to the class number formula, which gives no h(D) for it (the
-// slow test t-zeta-quadratic-l1): D = -(2^44 + 23) = -3^2 * 59 * 4457 *
+// passes it to the class number formula, which gives no h(D) for this value
+// (the slow test t-zeta-quadratic-l1; not a property of the formula): D = -(2^44 + 23) = -3^2 * 59 * 4457 *
 // 7433317.
 void check_non_fundamental_fallback() noexcept {
     {

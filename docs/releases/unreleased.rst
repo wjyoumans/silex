@@ -1911,12 +1911,13 @@ Changed
   ``verified`` (previously ``not_checked``),
   ``analytic_class_regulator_certification()`` is ``grh``, and
   ``zeta_bf_proof_record()`` is now populated (previously none).  Fields with ``|D| < 2^34`` keep the
-  exact class number and their output is unchanged; ``proven`` requests are
-  unaffected (their cutoff stays ``2^44``).  See
+  exact class number and their output is unchanged; ``proven`` requests were
+  unaffected by this entry (their cutoff stayed ``2^44``; a later entry
+  raises it to ``2^54`` for fundamental ``D``).  See
   :doc:`../development/class_number_route_cutoff`.
 
 - ``proven`` class/unit computations on an imaginary quadratic field with
-  ``|D| >= 2^44`` take the exact class number ``h(D)`` from Dirichlet's
+  ``|D| >= 2^44`` took the exact class number ``h(D)`` from Dirichlet's
   class number formula with a rigorous ``L(1, chi_D)`` enclosure in ball
   arithmetic, instead of listing the reduced forms of discriminant ``D``
   (time and memory growing like ``sqrt(|D|)``).  The value is taken only
@@ -1928,7 +1929,8 @@ Changed
   ``x^2 + x + c`` presentation at ``1e14`` did not finish.  The formula is
   checked directly by the slow test ``t-zeta-quadratic-l1`` (run with
   ``SILEX_TEST_SLOW``).  Fields with ``|D| < 2^44`` and all labels are
-  unchanged.
+  unchanged.  A later entry
+  raises the cutoff to ``2^54`` for fundamental ``D``.
 
 - A class-group factor base with more than ``2^14`` generators is refused
   before any matrix is allocated: ``ClassGroupContext::build_factor_base``,
