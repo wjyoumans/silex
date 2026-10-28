@@ -142,10 +142,11 @@ Changed
   outputs, with timing keys removed, are identical on 171 corpus rows
   (``cyclotomic_real_163_deg81`` times out on both), including
   ``regulator_radius``; no output field changed.  Whole-process callgrind Ir
-  of ``grh`` (busy machine) drops by 8.06% on ``cyclotomic_39_phi24``, 6.72%
-  on ``random_d12_h2_s16_proven``, 6.90% on ``cyclotomic_real_37_deg18`` and
-  3.62% on ``hexadecic_x16_minus_x_minus_1_proven``; no measured row is
-  slower.
+  of ``grh`` (busy machine) drops by 9.05% on ``cyclotomic_39_phi24`` and
+  6.91% on ``random_d12_h2_s16_proven`` against commit 8fe8c171, and by
+  6.90% on ``cyclotomic_real_37_deg18`` and 3.62% on
+  ``hexadecic_x16_minus_x_minus_1_proven`` against commit eecd18e0; no
+  measured row is slower.
 
 - The ``grh`` index bound used by validation now computes a refined
   Belabas-Friedman value (Theorem 7, target denominator ``max(8, 2B)``)
